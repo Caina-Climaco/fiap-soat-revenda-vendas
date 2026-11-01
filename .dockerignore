@@ -1,0 +1,16 @@
+# Lista de permissão: o contexto de build só leva o que a imagem usa. Assim .env, .git,
+# kubeconfig, state do Terraform, testes e caches nunca entram na imagem nem no contexto.
+*
+!pyproject.toml
+!uv.lock
+!.python-version
+!src/
+!alembic.ini
+!migrations/
+
+# Mesmo dentro das pastas permitidas, nada de artefatos locais.
+**/__pycache__
+**/*.py[cod]
+**/.mypy_cache
+**/.ruff_cache
+**/.pytest_cache

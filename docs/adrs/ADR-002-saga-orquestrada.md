@@ -34,6 +34,8 @@ A compra altera dados em dois serviços com bancos diferentes: o anúncio e a co
 - **Gravar antes de chamar**: o passo é marcado como "em andamento" antes da chamada externa e "concluído" depois da resposta. Uma queda entre os dois deixa a saga num estado que a recuperação sabe tratar, porque toda operação é idempotente pela `compra_id`.
 - **Compensação em ordem inversa** e só dos passos concluídos ou em andamento (compensar um passo que não aconteceu é inofensivo, pela idempotência).
 - **Depois do pivô não se compensa**: falhas em T5 e T6 são repetidas até concluir.
+- **Antes do pivô, a falha cancela na hora**: o comprador ainda não tem o código do pagamento, então a compra é cancelada assim que T2 ou T3 falham (503 ou 409 na resposta). A liberação do anúncio (C1, local) roda imediatamente; as compensações remotas que falharem ficam pendentes, com backoff, até concluírem. Devolver o anúncio antes do C2 é seguro por causa da regra contra ressurreição do principal.
+- **Na espera do pagamento, o C3 decide**: expiração ou cancelamento do processador começam pelo cancelamento da cobrança. Se o principal responde que a cobrança já foi paga, o pivô aconteceu e a saga segue para T5 e T6; se o principal não responde, a compra continua aguardando e a decisão é tentada de novo.
 - Cada transição gera log estruturado, métrica (`saga_transicoes_total{passo, resultado}`) e span no trace.
 
 ## Consequências
