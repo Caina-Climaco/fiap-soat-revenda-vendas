@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -40,10 +41,14 @@ class PrincipalFalso:
     # Respostas forçadas por trecho do caminho (consumidas na ordem): um status (corpo em
     # texto) ou (status, tipo do problema). Ex.: {"bloqueio": [503, (409, "compra-compensada")]}
     falhas: dict[str, list[int | tuple[int, str]]] = field(default_factory=dict)
+    # Executado a cada chamada (ex.: avançar o relógio para simular chamadas lentas)
+    ao_chamar: Callable[[], None] | None = None
 
     def __call__(self, requisicao: httpx.Request) -> httpx.Response:
         caminho = requisicao.url.path
         self.chamadas.append((requisicao.method, caminho))
+        if self.ao_chamar is not None:
+            self.ao_chamar()
         if self.fora_do_ar:
             raise httpx.ConnectError("principal fora do ar", request=requisicao)
         for trecho, codigos in self.falhas.items():

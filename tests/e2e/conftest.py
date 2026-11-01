@@ -31,7 +31,8 @@ import pytest
 from apoio_e2e import Ambiente
 
 OBRIGATORIAS = ("E2E_GESTOR_APIKEY", "E2E_GATEWAY_PAGAMENTO_APIKEY", "E2E_WEBHOOK_SECRET")
-TIMEOUT = httpx.Timeout(20.0, connect=5.0)
+# Igual ao read_timeout do Kong: a compra com o principal fora espera os timeouts dele
+TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
