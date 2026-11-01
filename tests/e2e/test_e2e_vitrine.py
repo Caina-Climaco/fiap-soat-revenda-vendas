@@ -34,7 +34,7 @@ def test_vendidos_do_mais_barato_ao_mais_caro_sem_comprador(http: httpx.Client) 
     pagina = http.get("/api/v1/veiculos/vendidos", params={"limite": 100})
     assert pagina.status_code == 200
     itens = pagina.json()["itens"]
-    precos = [Decimal(v["preco"]) for v in itens]
+    precos = [Decimal(v["preco_venda"]) for v in itens]
     assert precos == sorted(precos)
     assert all("cpf" not in v for v in itens)
 

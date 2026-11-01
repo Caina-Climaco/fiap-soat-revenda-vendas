@@ -108,6 +108,7 @@ class OrquestradorCompra:
             acao = self._proxima_acao(compra, agora)
             if acao is None:
                 break
+            retentativas = compra.saga.tentativas
             try:
                 acao(compra, agora)
             except ConflitoRevisaoError:
@@ -116,6 +117,12 @@ class OrquestradorCompra:
                 if relida is None:  # pragma: no cover - compras nunca são apagadas
                     break
                 compra = relida
+                continue
+            if compra.saga.tentativas > retentativas:
+                # Falha transitória agendou nova tentativa: a saga espera o backoff (a
+                # recuperação retoma). Sem isso, como as chamadas lentas consomem o tempo
+                # do backoff, a mesma requisição repetiria a compensação remota.
+                break
         return compra
 
     # ------------------------------------------------------------ decisão

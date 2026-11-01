@@ -88,6 +88,23 @@ def test_principal_fora_do_ar_compensa_e_responde_503(
     assert componentes.recuperar.executar().sagas_processadas == 0  # ainda no backoff
 
 
+def test_principal_lento_e_fora_do_ar_uma_tentativa_de_compensacao_por_requisicao(
+    api: Api, principal: PrincipalFalso, relogio: RelogioFixo
+) -> None:
+    """Cada chamada ao principal leva 2 s (timeout). Falhou a compensação remota, a saga
+    espera a próxima tentativa agendada: não repete o C2 na mesma requisição, que ficaria
+    lenta para o comprador (o caso visto no cluster: 3 C2 seguidos, 24 s de resposta)."""
+    veiculo = api.replicar()
+    principal.fora_do_ar = True
+    principal.ao_chamar = lambda: relogio.avancar(timedelta(seconds=2))
+    resposta = api.comprar(veiculo)
+    assert resposta.status_code == 503
+    assert api.anuncio(veiculo)["status"] == "A_VENDA"  # C1 local na hora
+    tentativas_t2 = 3  # o cliente HTTP repete até 3 vezes
+    tentativas_c2 = 3
+    assert len(principal.caminhos("bloqueio")) == tentativas_t2 + tentativas_c2
+
+
 def test_compensacao_pendente_concluida_pela_recuperacao(
     api: Api, principal: PrincipalFalso, componentes: Componentes, relogio: RelogioFixo
 ) -> None:
