@@ -1,0 +1,173 @@
+[project]
+name = "vendas"
+version = "0.1.0"
+description = "Serviço de venda da revenda de veículos (FIAP PósTech SOAT, Fase 4): vitrine, compra por CPF e saga orquestrada."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "cryptography>=46",
+    "fastapi>=0.142.2,<0.143",
+    "httpx>=0.28.1,<0.29",
+    "opentelemetry-api>=1.30",
+    "opentelemetry-sdk>=1.30",
+    "opentelemetry-exporter-otlp-proto-http>=1.30",
+    "opentelemetry-instrumentation-fastapi>=0.51b0",
+    "opentelemetry-instrumentation-httpx>=0.51b0",
+    "opentelemetry-instrumentation-pymongo>=0.51b0",
+    "prometheus-client>=0.26.0,<0.27",
+    "pydantic>=2.13.5,<2.14",
+    "pydantic-settings>=2.15.0,<2.16",
+    "pymongo>=4.10,<5",
+    "uvicorn[standard]>=0.54.0,<0.55",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.32,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "import-linter>=2.15,<3",
+    "mongomock>=4.3",
+    "mypy>=2.4.0,<3",
+    "pytest>=9.1.1,<10",
+    "pytest-bdd>=8.1",
+    "pytest-cov>=7.1.0,<8",
+    "ruff>=0.16.10,<0.17",
+]
+
+# ---------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "N", "SIM", "RUF", "S", "C4", "PT", "RET"]
+ignore = [
+    "RUF001", # textos em português usam caracteres que o ruff considera ambíguos (ex.: travessão)
+    "RUF002",
+    "RUF003",
+    "B008",   # Depends()/Query() em parâmetros padrão é o idioma do FastAPI
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S311", "PT011"]
+# Aliases de tipo Annotated[..., Depends(...)] declarados dentro das fábricas de routers.
+"src/vendas/interfaces/router.py" = ["N806"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["vendas", "apoio"]
+
+# ---------------------------------------------------------------- mypy
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+packages = ["vendas"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+# ---------------------------------------------------------------- pytest / coverage
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = ["tests"]
+pythonpath = ["tests"]
+addopts = ["-m", "not e2e", "--strict-markers", "--import-mode=importlib", "-ra"]
+markers = [
+    "unit: testes de unidade (sem banco, sem rede, relógio fixo)",
+    "integration: testes de integração (MongoDB real via TEST_MONGO_URL; sem ela, MongoDB simulado)",
+    "bdd: cenários Gherkin da saga da compra (pytest-bdd)",
+    "contrato: testes de contrato das rotas internas (contratos/)",
+    "e2e: testes ponta a ponta contra o ambiente implantado (Kong + dois serviços)",
+]
+filterwarnings = [
+    "error::pytest.PytestUnraisableExceptionWarning",
+    # Aviso do starlette sobre o cliente HTTP do TestClient (biblioteca, não código nosso).
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
+
+[tool.coverage.run]
+source = ["vendas"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 80  # mesmo limiar do --cov-fail-under do CI (docs/09, secao 9.4)
+show_missing = true
+skip_covered = false
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "^\\s*\\.\\.\\.$",
+    "class .*\\(Protocol\\):",
+]
+
+# ---------------------------------------------------------------- import-linter
+# Regras da arquitetura: camadas e domínio sem frameworks.
+[tool.importlinter]
+root_packages = ["vendas"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Camadas (interfaces | infrastructure > application > domain)"
+type = "layers"
+layers = ["vendas.interfaces | vendas.infrastructure", "vendas.application", "vendas.domain"]
+
+[[tool.importlinter.contracts]]
+name = "Domínio usa apenas a biblioteca padrão"
+type = "forbidden"
+source_modules = ["vendas.domain"]
+forbidden_modules = [
+    "vendas.shared",
+    "vendas.main",
+    "vendas.composicao",
+    "fastapi",
+    "starlette",
+    "pydantic",
+    "pydantic_settings",
+    "pymongo",
+    "httpx",
+    "cryptography",
+    "opentelemetry",
+]
+
+[[tool.importlinter.contracts]]
+name = "Casos de uso e saga não dependem de frameworks nem de adaptadores"
+type = "forbidden"
+source_modules = ["vendas.application"]
+forbidden_modules = [
+    "vendas.main",
+    "vendas.composicao",
+    "vendas.shared.auth",
+    "vendas.shared.http",
+    "vendas.shared.mongo",
+    "vendas.shared.config",
+    "vendas.shared.errors",
+    "vendas.shared.logging",
+    "vendas.shared.saude",
+    "vendas.shared.tracing",
+    "fastapi",
+    "starlette",
+    "pydantic",
+    "pymongo",
+    "httpx",
+    "cryptography",
+    "opentelemetry",
+]
+
+[[tool.importlinter.contracts]]
+name = "shared não conhece o negócio"
+type = "forbidden"
+source_modules = ["vendas.shared"]
+forbidden_modules = [
+    "vendas.domain",
+    "vendas.application",
+    "vendas.infrastructure",
+    "vendas.interfaces",
+    "vendas.main",
+    "vendas.composicao",
+]
