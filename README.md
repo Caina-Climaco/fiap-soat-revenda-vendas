@@ -1,13 +1,14 @@
 # Revenda de Veículos: serviço de venda
 
 [![CI](https://github.com/Caina-Climaco/fiap-soat-revenda-vendas/actions/workflows/ci.yml/badge.svg)](https://github.com/Caina-Climaco/fiap-soat-revenda-vendas/actions/workflows/ci.yml)
+[![CD](https://github.com/Caina-Climaco/fiap-soat-revenda-vendas/actions/workflows/cd.yml/badge.svg)](https://github.com/Caina-Climaco/fiap-soat-revenda-vendas/actions/workflows/cd.yml)
+[![Quality Gate](https://sonarcloud.io/api/project_badges/measure?project=Caina-Climaco_fiap-soat-revenda-vendas&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Caina-Climaco_fiap-soat-revenda-vendas)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Caina-Climaco_fiap-soat-revenda-vendas&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Caina-Climaco_fiap-soat-revenda-vendas)
 
 Trabalho Substitutivo do Tech Challenge, FIAP PósTech Software Architecture (SOAT), Fase 4.
 Autor: Cainã Clímaco, RM366473 (trabalho individual).
 
 > **Esta entrega tem dois repositórios.** Este é o do **serviço de venda** (listagens, compra e orquestração da saga, com MongoDB isolado). O **serviço principal** (cadastro e edição de veículos, cobrança e webhook de pagamento), a plataforma comum e a documentação da solução estão em **[fiap-soat-revenda-principal](https://github.com/Caina-Climaco/fiap-soat-revenda-principal)**.
-
-**Em construção.** Este README cresce a cada PR; a infraestrutura (kind, Terraform, CronJob de recuperação) e o CD entram nos próximos.
 
 ## 1. O que é
 
@@ -79,11 +80,41 @@ uv run pytest -m "unit or integration or bdd"
 
 O principal é substituído nos testes por um falso que implementa as rotas internas com o mesmo contrato (`tests/apoio/principal_falso.py`), ligado ao cliente HTTP real: a saga passa pelo retry e pelo circuit breaker de verdade, sem rede. O fluxo completo está em Gherkin em `tests/bdd/features/compra.feature` (caminho feliz, pagamento cancelado, reserva expirada e principal fora do ar).
 
-## 5. Fluxo de contribuição
+## 5. Como executar localmente (cluster kind)
 
-A `main` é protegida: toda mudança entra por Pull Request, com título em Conventional Commits e os checks do CI verdes (`qualidade`, `testes`, `titulo-pr`).
+O serviço roda no cluster kind da plataforma comum, criado pelo repositório principal. Pré-requisitos: Windows 11 com Docker Desktop, `kind`, `kubectl` e `terraform`.
 
-## 6. Documentação
+```powershell
+# 1. No repositório principal: plataforma (cluster, Kong, observabilidade) e o CD de lá
+# 2. Aqui: namespace vendas e MongoDB 7
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\04-subir-ambiente.ps1
+# 3. Runner do CD deste repositório e o primeiro deploy (API e CronJob de recuperação)
+powershell -ExecutionPolicy Bypass -File .\scripts\windows\03-instalar-runner.ps1
+gh workflow run cd.yml -R Caina-Climaco/fiap-soat-revenda-vendas
+```
+
+| Endereço | O quê |
+|---|---|
+| `http://localhost:8080/api/v1/veiculos/a-venda` | Vitrine (pelo Kong) |
+| `http://localhost:8080/vendas/docs` | Swagger do serviço de venda |
+| `http://localhost:16686` | Jaeger: a compra inteira em um trace, com as compensações quando há falha |
+| `http://localhost:3000` | Grafana: painel "saga e resiliência" |
+| `localhost:27017` | MongoDB (demonstração; comando do `mongosh` em `terraform output comandos_uteis`) |
+
+Comprar pelo Kong (sem autenticação; a versão vem da vitrine):
+
+```bash
+curl -X POST http://localhost:8080/api/v1/compras -H "Content-Type: application/json" \
+  -d '{"veiculo_id":"<id da vitrine>","versao":1,"cpf":"529.982.247-25"}'
+```
+
+Detalhes em [infra/README.md](infra/README.md) e [k8s/README.md](k8s/README.md).
+
+## 6. Fluxo de contribuição
+
+A `main` é protegida: toda mudança entra por Pull Request, com título em Conventional Commits e os checks do CI verdes (`qualidade`, `testes`, `sonarcloud`, `imagem`, `infra`, `titulo-pr`). O merge dispara o CD, que implanta no kind e roda os testes ponta a ponta pelo Kong (`tests/e2e`): o fluxo da compra paga, o pagamento cancelado, compras recusadas e a **demonstração de falha**, em que o principal é derrubado de propósito (a vitrine continua no ar, a compra é desfeita com 503 e, com o principal de volta, o circuit breaker fecha e a compra segue).
+
+## 7. Documentação
 
 | Documento | Conteúdo |
 |---|---|

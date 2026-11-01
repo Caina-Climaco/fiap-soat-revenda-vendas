@@ -1,0 +1,319 @@
+# Entrega continua do servico de venda (ADR-006 da solucao).
+# Roda SOMENTE no runner self-hosted deste repositorio, um container Linux no Docker
+# Desktop do PC do autor (infra/runner; labels self-hosted, Linux, kind-local), e SOMENTE
+# em push na main (PR mergeado) ou disparo manual. O container esta na rede docker "kind"
+# e grava o state do Terraform em /revenda-state/revenda-vendas.tfstate (bind mount de
+# %USERPROFILE%\.revenda, o mesmo arquivo do scripts/windows/04-subir-ambiente.ps1).
+# PRE-REQUISITO: a plataforma do repositorio principal (cluster, Kong, Collector, Secret de
+# contrato dos tokens e o proprio principal) ja implantada. O CD confere e falha cedo.
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "SHA (ou branch/tag) a implantar. Vazio = commit atual da main. Use para rollback (docs/08-ci-cd.md)."
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-local
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  deploy:
+    name: deploy
+    runs-on: [self-hosted, Linux, kind-local]
+    environment: local
+    timeout-minutes: 60
+    env:
+      KIND_CLUSTER: revenda
+      NS_APP: vendas
+      NS_PRINCIPAL: principal
+      APP: revenda-vendas
+      # NodePorts pelo nome do no na rede "kind" (localhost:* sao portas do host Windows).
+      # 30080 = API Gateway (Kong); os servicos sao ClusterIP e so o Kong chega neles.
+      E2E_GATEWAY_URL: http://revenda-control-plane:30080
+      E2E_JAEGER_URL: http://revenda-control-plane:30686
+      PROMETHEUS_URL: http://revenda-control-plane:30900
+      GRAFANA_URL: http://revenda-control-plane:30300
+      STATE_DIR: /revenda-state
+      TF_DATA_DIR: /home/runner/persist/terraform-data
+      STATE_FILE: revenda-vendas.tfstate
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          clean: true
+          persist-credentials: false
+          # Historico completo: a validacao abaixo precisa da ancestralidade ate a main.
+          fetch-depth: 0
+
+      # Disparo manual so implanta commits que ja estao na main (revisados por PR e com CI
+      # verde). Vale para qualquer workflow_dispatch: com `ref` informado ou vazio, ja que
+      # o disparo manual tambem pode ser feito "a partir de" outra branch.
+      - name: Valida que o commit pertence a main (workflow_dispatch)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          REF_SOLICITADA: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::O commit ${SHA} (ref solicitada: '${REF_SOLICITADA:-}', branch do disparo: '${GITHUB_REF_NAME}') nao pertence ao historico da main. O CD so implanta commits ja mergeados na main."
+            exit 1
+          fi
+          echo "OK: ${SHA} pertence ao historico da main."
+          # Commits anteriores a infraestrutura nao tem o que implantar
+          if [ ! -f infra/terraform/versions.tf ] || [ ! -f Dockerfile ]; then
+            echo "::error::O commit ${SHA} e anterior a infraestrutura (sem infra/terraform ou Dockerfile) e nao pode ser implantado por este CD."
+            exit 1
+          fi
+
+      - name: Contexto (SHA, diretorios, kubeconfig)
+        env:
+          REF_SOLICITADA: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
+          WORK_TMP="${RUNNER_TEMP}/revenda-cd"
+          KCFG="${HOME}/.kube/config"
+          mkdir -p "$WORK_TMP" "$TF_DATA_DIR" "$(dirname "$KCFG")"
+          if [ ! -d "$STATE_DIR" ] || [ ! -w "$STATE_DIR" ]; then
+            echo "::error::${STATE_DIR} ausente ou sem escrita: o container do runner precisa do bind mount de %USERPROFILE%\\.revenda (scripts/windows/03-instalar-runner.ps1)"
+            exit 1
+          fi
+          {
+            echo "SHA=${SHA}"
+            echo "IMAGEM=${APP}:${SHA}"
+            echo "KUBECONFIG=${KCFG}"
+            echo "TF_VAR_kubeconfig_path=${KCFG}"
+            echo "WORK_TMP=${WORK_TMP}"
+          } >> "$GITHUB_ENV"
+          echo "Implantando ${SHA} (evento: ${GITHUB_EVENT_NAME}, ref solicitada: '${REF_SOLICITADA:-}')"
+          for ferramenta in docker kind kubectl terraform python3 curl jq base64 sed; do
+            command -v "$ferramenta" >/dev/null 2>&1 || { echo "::error::Ferramenta ausente no PATH do runner: $ferramenta"; exit 1; }
+          done
+          docker version --format 'docker {{.Server.Version}}'
+          kind version
+          kubectl version --client
+          terraform version
+
+      # O cluster e criado pela CLI kind, nao pelo Terraform: o provider tehcyx/kind nao
+      # tem assinatura de codigo e e bloqueado pelo Smart App Control do Windows 11 (ADR-006).
+      # O cluster, o Kong e a observabilidade sao do repositorio principal (ADR-006 da
+      # solucao): este CD nao os cria; so confere que existem e falha cedo se faltarem.
+      - name: Plataforma do principal publicada (contrato)
+        run: |
+          set -euo pipefail
+          if ! kind get clusters 2>/dev/null | grep -qx "$KIND_CLUSTER"; then
+            echo "::error::Cluster kind '${KIND_CLUSTER}' inexistente. Implante antes o repositorio fiap-soat-revenda-principal (04-subir-ambiente.ps1 e o CD de la)."
+            exit 1
+          fi
+          if [ -z "$(docker port "${KIND_CLUSTER}-control-plane" 30686/tcp 2>/dev/null)" ]; then
+            echo "::error::O cluster '${KIND_CLUSTER}' e de uma fase anterior (sem a porta do Jaeger). Recrie pelo repositorio principal (04-subir-ambiente.ps1 -RecriarCluster)."
+            exit 1
+          fi
+          kind export kubeconfig --internal --name "$KIND_CLUSTER"
+          kubectl get nodes -o wide
+          kubectl -n "$NS_PRINCIPAL" get secret contrato-tokens-servico >/dev/null \
+            || { echo "::error::Secret ${NS_PRINCIPAL}/contrato-tokens-servico ausente: implante o Terraform do principal."; exit 1; }
+          kubectl -n gateway rollout status deployment/kong --timeout=60s
+          kubectl -n observabilidade rollout status deployment/otel-collector --timeout=60s
+          prontos="$(kubectl -n "$NS_PRINCIPAL" get deployment revenda-principal -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
+          [ "${prontos:-0}" -ge 1 ] 2>/dev/null \
+            || { echo "::error::revenda-principal sem replicas prontas: rode o CD do repositorio principal."; exit 1; }
+          echo "OK: cluster, Kong, Collector, contrato de tokens e principal (${prontos} replica(s))"
+
+      - name: Terraform (namespace vendas, MongoDB, segredos e NetworkPolicies)
+        working-directory: infra/terraform
+        run: |
+          set -euo pipefail
+          # Mesmo state do Windows (/revenda-state); TF_DATA_DIR proprio (providers linux).
+          terraform init -input=false -reconfigure -backend-config="path=${STATE_DIR}/${STATE_FILE}"
+          terraform apply -input=false -auto-approve
+
+      - name: Build da imagem ${{ env.IMAGEM }}
+        run: |
+          set -euo pipefail
+          if docker image inspect "$IMAGEM" >/dev/null 2>&1; then
+            echo "Imagem $IMAGEM ja existe no Docker local (reimplantacao/rollback): build reaproveitado."
+          else
+            docker build --label "org.opencontainers.image.revision=${SHA}" -t "$IMAGEM" .
+          fi
+
+      - name: Carga da imagem no kind
+        run: kind load docker-image "$IMAGEM" --name "$KIND_CLUSTER"
+
+      - name: Deploy do revenda-vendas (k8s/base)
+        run: |
+          set -euo pipefail
+          # Renderiza a base, troca a imagem neutra pela tag do SHA e aplica de uma vez.
+          # (Aplicar a base com a tag dev e so depois usar `set image` criaria um
+          # ReplicaSet intermediario com imagem inexistente e quebraria o `rollout undo`.)
+          manifesto="${WORK_TMP}/base.yaml"
+          kubectl kustomize k8s/base > "$manifesto"
+          sed -E -i "s#^([[:space:]]*-?[[:space:]]*image:[[:space:]]*[\"']?)${APP}(:[A-Za-z0-9._-]+)?([\"']?)[[:space:]]*\$#\1${APP}:${SHA}\3#" "$manifesto"
+          grep -q "${APP}:${SHA}" "$manifesto" || { echo "::error::Imagem ${APP} nao encontrada no manifesto renderizado de k8s/base"; exit 1; }
+          kubectl apply -f "$manifesto"
+          # Garantia idempotente (sem efeito se o apply ja definiu a mesma imagem); container `api` e contrato.
+          kubectl -n "$NS_APP" set image deployment/${APP} "api=${IMAGEM}"
+          kubectl -n "$NS_APP" annotate deployment/${APP} kubernetes.io/change-cause="CD ${SHA}" --overwrite
+          if ! kubectl -n "$NS_APP" rollout status deployment/${APP} --timeout=180s; then
+            echo "::error::Rollout nao concluiu em 180 s"
+            kubectl -n "$NS_APP" get pods -o wide || true
+            kubectl -n "$NS_APP" describe deployment ${APP} || true
+            kubectl -n "$NS_APP" logs deployment/${APP} --all-containers --tail=100 || true
+            exit 1
+          fi
+          atual="$(kubectl -n "$NS_APP" get deployment ${APP} -o jsonpath='{.spec.template.spec.containers[?(@.name=="api")].image}')"
+          [ "$atual" = "$IMAGEM" ] || { echo "::error::Deployment com imagem inesperada: '$atual' (esperada: $IMAGEM)"; exit 1; }
+          kubectl -n "$NS_APP" get deployment,pods,svc,hpa -o wide
+
+      # Os servicos nao tem rota de saude no Kong: a prontidao vem do rollout acima; aqui se
+      # confere o caminho publico ate o servico de venda (Kong -> Service -> pod).
+      - name: Servico de venda alcancavel pelo Kong
+        run: |
+          set -euo pipefail
+          url="${E2E_GATEWAY_URL}/vendas/openapi.json"
+          for _ in $(seq 1 36); do
+            if curl -fsS -o /dev/null --max-time 5 "$url"; then echo "OK: $url"; exit 0; fi
+            sleep 5
+          done
+          echo "::error::Sem resposta 2xx de $url em 180 s"
+          exit 1
+
+      # O CronJob recebe a mesma imagem do rollout e uma execucao de fumaca prova, a cada
+      # deploy, que a recuperacao de sagas sobe e termina com sucesso.
+      - name: Recuperacao de sagas (CronJob revenda-vendas-recuperacao)
+        run: |
+          set -euo pipefail
+          manifesto="${WORK_TMP}/recuperacao.yaml"
+          kubectl kustomize k8s/recuperacao > "$manifesto"
+          sed -E -i "s#^([[:space:]]*-?[[:space:]]*image:[[:space:]]*[\"']?)${APP}(:[A-Za-z0-9._-]+)?([\"']?)[[:space:]]*\$#\1${APP}:${SHA}\3#" "$manifesto"
+          grep -q "${APP}:${SHA}" "$manifesto" || { echo "::error::Imagem ${APP} nao encontrada no manifesto renderizado de k8s/recuperacao"; exit 1; }
+          kubectl apply -n "$NS_APP" -f "$manifesto"
+          atual="$(kubectl -n "$NS_APP" get cronjob revenda-vendas-recuperacao -o jsonpath='{.spec.jobTemplate.spec.template.spec.containers[?(@.name=="recuperacao")].image}')"
+          [ "$atual" = "$IMAGEM" ] || { echo "::error::CronJob com imagem inesperada: '$atual' (esperada: $IMAGEM)"; exit 1; }
+          job="recuperacao-cd-${SHA:0:12}"
+          kubectl -n "$NS_APP" delete job "$job" --ignore-not-found --wait=true
+          kubectl -n "$NS_APP" create job "$job" --from=cronjob/revenda-vendas-recuperacao
+          if ! kubectl -n "$NS_APP" wait --for=condition=complete --timeout=120s "job/${job}"; then
+            echo "::error::Recuperacao nao concluiu (job ${job} sem sucesso)."
+            kubectl -n "$NS_APP" describe job "$job" || true
+            kubectl -n "$NS_APP" logs "job/${job}" --all-containers --tail=100 || true
+            exit 1
+          fi
+          kubectl -n "$NS_APP" logs "job/${job}" --all-containers --tail=20 || true
+          kubectl -n "$NS_APP" delete job "$job" --ignore-not-found --wait=false
+          kubectl -n "$NS_APP" get cronjob revenda-vendas-recuperacao
+
+      # O Prometheus da plataforma passa a coletar o servico de venda (descoberta por anotacao).
+      - name: Monitoramento (Prometheus coleta o servico de venda)
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 24); do
+            alvos="$(curl -fsS --max-time 5 --get "${PROMETHEUS_URL}/api/v1/query" \
+              --data-urlencode "query=count(up{job=\"${APP}\"} == 1)" | jq -r '.data.result[0].value[1] // "0"' || echo 0)"
+            [ "${alvos:-0}" != "0" ] && break
+            sleep 5
+          done
+          [ "${alvos:-0}" != "0" ] || { echo "::error::Prometheus sem alvos ativos do job ${APP}"; exit 1; }
+          echo "OK: Prometheus coleta ${alvos} alvo(s) do job ${APP}"
+
+      - name: Python 3.12 para o e2e
+        # python3 da imagem do runner (Ubuntu 24.04); sem actions/setup-python
+        run: |
+          set -euo pipefail
+          python3 --version
+          python3 -c 'import sys; assert sys.version_info[:2] >= (3, 12), sys.version'
+
+      - name: Dependencias do e2e (pytest + httpx, isoladas do pacote vendas)
+        run: |
+          set -euo pipefail
+          python3 -m venv "${WORK_TMP}/e2e-venv"
+          VENV_PY="${WORK_TMP}/e2e-venv/bin/python"
+          "$VENV_PY" -m pip install --disable-pip-version-check --quiet -r tests/e2e/requirements.txt
+          "$VENV_PY" -m pytest --version
+          echo "VENV_PY=${VENV_PY}" >> "$GITHUB_ENV"
+
+      - name: Testes ponta a ponta (pytest -m e2e)
+        id: e2e
+        run: |
+          set -euo pipefail
+          segredo() {
+            # Uso: segredo <namespace> <secret> <chave>
+            local valor
+            valor="$(kubectl -n "$1" get secret "$2" -o jsonpath="{.data.$3}" | base64 -d)"
+            if [ -z "$valor" ]; then echo "::error::Secret $1/$2 sem a chave $3" >&2; return 1; fi
+            printf '%s' "$valor"
+          }
+          E2E_GESTOR_APIKEY="$(segredo gateway consumidores-kong GESTOR_APIKEY)"
+          echo "::add-mask::${E2E_GESTOR_APIKEY}"
+          E2E_GATEWAY_PAGAMENTO_APIKEY="$(segredo gateway consumidores-kong GATEWAY_PAGAMENTO_APIKEY)"
+          echo "::add-mask::${E2E_GATEWAY_PAGAMENTO_APIKEY}"
+          E2E_WEBHOOK_SECRET="$(segredo "$NS_PRINCIPAL" principal-webhook WEBHOOK_SECRET)"
+          echo "::add-mask::${E2E_WEBHOOK_SECRET}"
+          export E2E_GESTOR_APIKEY E2E_GATEWAY_PAGAMENTO_APIKEY E2E_WEBHOOK_SECRET
+          # Demonstracao de falha: o teste derruba o principal (escala para 0) e o restaura
+          export E2E_CAOS=1
+          # No CD a ausencia de variaveis e erro (nunca skip silencioso).
+          export E2E_EXIGIR=1
+          # tests/e2e/pytest.ini isola a configuracao do pyproject (addopts -m "not e2e").
+          "$VENV_PY" -m pytest tests/e2e -m e2e -p no:cacheprovider -o addopts="" \
+            -v -rA --junitxml="${WORK_TMP}/e2e-junit.xml"
+
+      - name: Diagnostico em falha
+        if: ${{ failure() }}
+        run: |
+          kubectl get pods -A -o wide || true
+          kubectl -n "$NS_APP" get events --sort-by=.lastTimestamp | tail -n 40 || true
+          kubectl -n "$NS_APP" logs deployment/${APP} --all-containers --tail=200 || true
+          kubectl -n "$NS_APP" logs -l app=revenda-vendas-recuperacao --tail=50 || true
+          kubectl -n "$NS_PRINCIPAL" get deployment revenda-principal || true
+          kubectl -n gateway logs deployment/kong --tail=80 || true
+          # O teste de caos restaura o principal; se ele falhou no meio, garante a volta.
+          if [ "$(kubectl -n "$NS_PRINCIPAL" get deployment revenda-principal -o jsonpath='{.spec.replicas}' 2>/dev/null || echo 2)" = "0" ]; then
+            kubectl -n "$NS_PRINCIPAL" scale deployment revenda-principal --replicas=2 || true
+          fi
+          echo "Rollback: Actions > CD > Run workflow com ref=<sha-anterior>, ou 'kubectl -n vendas rollout undo deployment/revenda-vendas'."
+
+      - name: Resumo da implantacao
+        if: ${{ always() }}
+        run: |
+          {
+            echo "## Deploy local (kind \`${KIND_CLUSTER}\`)"
+            echo ""
+            echo "| Item | Valor |"
+            echo "|---|---|"
+            echo "| Commit | \`${SHA:-?}\` |"
+            echo "| Imagem | \`${IMAGEM:-?}\` |"
+            echo "| Evento | ${GITHUB_EVENT_NAME} |"
+            pronto="$(kubectl -n "$NS_APP" get deployment ${APP} -o jsonpath='{.status.readyReplicas}/{.status.replicas}' 2>/dev/null || echo '?')"
+            echo "| Replicas prontas | ${pronto} |"
+            echo "| Resultado do e2e | ${{ steps.e2e.outcome || 'nao executado' }} |"
+            if [ -f "${WORK_TMP:-/nonexistent}/e2e-junit.xml" ]; then
+              linha="$(grep -o '<testsuite [^>]*>' "${WORK_TMP}/e2e-junit.xml" | head -n 1)"
+              attr() { printf '%s' "$linha" | sed -n "s/.* $1=\"\([^\"]*\)\".*/\1/p"; }
+              echo "| Testes e2e | $(attr tests) total, $(attr failures) falhas, $(attr errors) erros, $(attr skipped) pulados |"
+            fi
+            echo "| Kong (no PC) | http://localhost:8080 (vitrine em /api/v1/veiculos/a-venda, Swagger em /vendas/docs) |"
+            echo "| Grafana / Prometheus / Jaeger (no PC) | http://localhost:3000 / http://localhost:9090 / http://localhost:16686 |"
+            echo "| Testado pelo runner em | ${E2E_GATEWAY_URL} (rede kind) |"
+            echo ""
+            echo "Rollback: Actions > CD > Run workflow com \`ref\` = SHA anterior."
+          } >> "$GITHUB_STEP_SUMMARY"

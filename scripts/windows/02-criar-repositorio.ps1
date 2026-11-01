@@ -2,7 +2,7 @@
 # Uso (na raiz do repositorio):
 #   powershell -ExecutionPolicy Bypass -File .\scripts\windows\02-criar-repositorio.ps1
 #   (para atualizar os checks obrigatorios depois que o CI existir:)
-#   powershell -ExecutionPolicy Bypass -File .\scripts\windows\02-criar-repositorio.ps1 -Checks qualidade,testes,contrato,sonarcloud,imagem,infra
+#   powershell -ExecutionPolicy Bypass -File .\scripts\windows\02-criar-repositorio.ps1 -Checks qualidade,testes,sonarcloud,imagem,infra
 # O commit e o push saem pela conta configurada no git e no gh desta maquina.
 # Arquivo somente ASCII (compatibilidade com Windows PowerShell 5.1).
 param(
@@ -46,6 +46,8 @@ try {
 
     # Protecao da main: PR obrigatorio, historico linear, sem force push, valendo para admins.
     # Os checks obrigatorios entram quando o CI existir (parametro -Checks).
+    # Via `powershell -File`, a lista a,b,c chega como um unico texto: separa nas virgulas.
+    $Checks = @($Checks | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     if ($Checks.Count -gt 0) {
         $listaChecks = ($Checks | ForEach-Object { '"' + $_ + '"' }) -join ", "
         $statusChecks = '{ "strict": true, "contexts": [' + $listaChecks + '] }'

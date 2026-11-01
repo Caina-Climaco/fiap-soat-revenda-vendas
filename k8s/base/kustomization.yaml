@@ -1,0 +1,13 @@
+# Manifestos do servico de venda. A tag neutra "dev" e trocada no CD pelo SHA do commit
+# (revenda-vendas:<sha>), sem commit.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: vendas
+resources:
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - hpa.yaml
+images:
+  - name: revenda-vendas
+    newTag: dev

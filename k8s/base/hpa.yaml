@@ -1,0 +1,27 @@
+# 2..5 replicas, alvo de 60% de CPU sobre o request (100m). Depende do metrics-server
+# instalado pelo Terraform (helm_release.metrics_server).
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: revenda-vendas
+  labels:
+    app: revenda-vendas
+    app.kubernetes.io/name: revenda-vendas
+    app.kubernetes.io/part-of: revenda-veiculos
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: revenda-vendas
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 120

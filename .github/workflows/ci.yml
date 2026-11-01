@@ -1,8 +1,8 @@
 # Integracao continua do servico de venda (ADR-008 da solucao).
-# Roda no runner hospedado do GitHub, sem segredos e sem acesso ao cluster.
+# Roda no runner hospedado do GitHub, sem acesso ao cluster. O unico segredo e o
+# SONAR_TOKEN, usado so pelo job sonarcloud.
 # Os nomes dos jobs sao required status checks da main: NAO renomear. Nao usar
 # paths-ignore: os checks obrigatorios precisam rodar em todo PR.
-# Os jobs `contrato`, `sonarcloud`, `imagem` e `infra` entram nos proximos PRs.
 name: CI
 
 on:
@@ -21,6 +21,12 @@ concurrency:
 
 env:
   PYTHON_VERSION: "3.12"
+  TERRAFORM_VERSION: "~1.16"
+  KUBECONFORM_VERSION: "v0.8.0"
+  KUBECONFORM_SHA256: "9bc2bffbf71f261128533edaf912153948b7ff238f9a531ae6d34466ec287883"
+  # Versao padrao da trivy-action v0.36.0; posterior as versoes comprometidas
+  # (v0.69.4-v0.69.6, GHSA-69fq-xp46-6x23).
+  TRIVY_VERSION: "v0.70.0"
 
 jobs:
   qualidade:
@@ -126,6 +132,216 @@ jobs:
           path: coverage.xml
           if-no-files-found: warn
           retention-days: 14
+
+  # Analise estatica e Quality Gate no SonarCloud (ADR-008 da solucao), com a cobertura do job testes.
+  # PR de fork nao recebe o SONAR_TOKEN: o job e pulado (o gate de 80% do pytest continua).
+  sonarcloud:
+    name: sonarcloud
+    needs: testes
+    if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout (historico completo para o blame do Sonar)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Cobertura do job testes
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: cobertura-${{ github.sha }}
+
+      # Configuracao em sonar-project.properties; o job falha se o Quality Gate falhar.
+      - name: SonarCloud (analise + Quality Gate)
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  imagem:
+    name: imagem
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build revenda-vendas:${{ github.sha }} (sem push)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          load: true
+          push: false
+          tags: revenda-vendas:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # trivy-action fixada por SHA de commit (v0.36.0): em marco/2026 as tags da
+      # trivy-action foram sequestradas (GHSA-69fq-xp46-6x23); tag mutavel nao e confiavel.
+      # Politica (docs/08-ci-cd.md): so CRITICAL corrigivel bloqueia o PR; HIGH e
+      # informativo (job summary) para um CVE novo nao travar todo PR do dia.
+      - name: Trivy - vulnerabilidades da imagem (CRITICAL corrigiveis bloqueiam)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          scan-type: image
+          image-ref: revenda-vendas:${{ github.sha }}
+          severity: CRITICAL
+          ignore-unfixed: true
+          vuln-type: os,library
+          format: table
+          exit-code: "1"
+
+      - name: Trivy - vulnerabilidades HIGH corrigiveis (informativo)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          skip-setup-trivy: true
+          scan-type: image
+          image-ref: revenda-vendas:${{ github.sha }}
+          severity: HIGH
+          ignore-unfixed: true
+          vuln-type: os,library
+          format: table
+          output: trivy-high.txt
+          exit-code: "0"
+
+      - name: Trivy - HIGH no resumo do job
+        if: always()
+        run: |
+          set -euo pipefail
+          {
+            echo "## Trivy - vulnerabilidades HIGH corrigiveis na imagem (informativo, nao bloqueia)"
+            echo
+            if [ -s trivy-high.txt ] && grep -q "Total:" trivy-high.txt; then
+              echo '```'
+              cat trivy-high.txt
+              echo '```'
+            else
+              echo "Nenhuma vulnerabilidade HIGH corrigivel encontrada."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Trivy - segredos no repositorio
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: ${{ env.TRIVY_VERSION }}
+          skip-setup-trivy: true
+          scan-type: fs
+          scan-ref: .
+          scanners: secret
+          format: table
+          exit-code: "1"
+
+  infra:
+    name: infra
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TF_IN_AUTOMATION: "1"
+      TF_INPUT: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: terraform fmt -check
+        run: terraform fmt -check -recursive -diff infra/terraform
+
+      - name: terraform init (sem backend)
+        run: terraform -chdir=infra/terraform init -backend=false -input=false
+
+      - name: terraform validate
+        run: terraform -chdir=infra/terraform validate
+
+      - name: Instala kubeconform ${{ env.KUBECONFORM_VERSION }}
+        run: |
+          set -euo pipefail
+          url="https://github.com/yannh/kubeconform/releases/download/${KUBECONFORM_VERSION}/kubeconform-linux-amd64.tar.gz"
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/kubeconform.tar.gz" "$url"
+          echo "${KUBECONFORM_SHA256}  ${RUNNER_TEMP}/kubeconform.tar.gz" | sha256sum -c -
+          tar -xzf "${RUNNER_TEMP}/kubeconform.tar.gz" -C "${RUNNER_TEMP}" kubeconform
+          echo "${RUNNER_TEMP}" >> "$GITHUB_PATH"
+
+      # Mesmo renderizador usado pelo CD (kubectl kustomize, embutido no kubectl da imagem
+      # ubuntu-latest), para o CI validar exatamente o que sera aplicado no cluster.
+      - name: kubectl kustomize + kubeconform (k8s/base e k8s/recuperacao)
+        run: |
+          set -euo pipefail
+          kubectl version --client
+          for dir in k8s/base k8s/recuperacao; do
+            echo "::group::$dir"
+            if [ ! -f "$dir/kustomization.yaml" ] && [ ! -f "$dir/kustomization.yml" ] && [ ! -f "$dir/Kustomization" ]; then
+              echo "::error::$dir sem kustomization.yaml (contrato com o cd.yml)"
+              exit 1
+            fi
+            saida="${RUNNER_TEMP}/$(echo "$dir" | tr '/' '-').yaml"
+            kubectl kustomize "$dir" > "$saida"
+            cat "$saida"
+            kubeconform -strict -ignore-missing-schemas -summary -output text "$saida"
+            echo "::endgroup::"
+          done
+
+      - name: Cluster kind (infra/kind/cluster.yaml valido e portas do contrato)
+        run: |
+          set -euo pipefail
+          arquivo=infra/kind/cluster.yaml
+          # yq (mikefarah) vem na imagem ubuntu-latest; falha se o YAML for invalido
+          yq -e '.kind == "Cluster" and .name == "revenda"' "$arquivo" >/dev/null \
+            || { echo "::error file=${arquivo}::YAML invalido ou sem kind: Cluster / name: revenda"; exit 1; }
+          # Contrato com o repositorio principal: o arquivo e identico nos dois
+          for par in 30080:8080 30432:15432 30017:27017 30300:3000 30900:9090 30686:16686; do
+            c="${par%%:*}"; h="${par##*:}"
+            yq -e "[.nodes[].extraPortMappings[] | select(.containerPort == ${c} and .hostPort == ${h})] | length == 1" "$arquivo" >/dev/null \
+              || { echo "::error file=${arquivo}::extraPortMapping ${c} -> ${h} ausente"; exit 1; }
+          done
+          yq -e '.nodes[0].image | test("^kindest/node:v[0-9.]+@sha256:[0-9a-f]{64}$")' "$arquivo" >/dev/null \
+            || { echo "::error file=${arquivo}::imagem do no deve ser fixada por digest"; exit 1; }
+          echo "Config do kind OK"
+
+      # A plataforma e do repositorio principal (ADR-006 da solucao): o cluster.yaml daqui tem
+      # de ser identico ao da main de la, senao os CDs criariam clusters diferentes.
+      - name: Cluster kind identico ao do repositorio principal
+        run: |
+          set -euo pipefail
+          url="https://raw.githubusercontent.com/Caina-Climaco/fiap-soat-revenda-principal/main/infra/kind/cluster.yaml"
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/cluster-principal.yaml" "$url"
+          if ! diff -u "${RUNNER_TEMP}/cluster-principal.yaml" infra/kind/cluster.yaml; then
+            echo "::error file=infra/kind/cluster.yaml::diferente do cluster.yaml da main do repositorio principal"
+            exit 1
+          fi
+          echo "cluster.yaml identico ao do principal"
+
+      - name: Runner em container (hadolint no Dockerfile, shellcheck no entrypoint)
+        env:
+          HADOLINT_VERSION: v2.15.1
+          HADOLINT_SHA256: c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507
+        run: |
+          set -euo pipefail
+          shellcheck --version | head -n 2
+          shellcheck infra/runner/entrypoint.sh
+          curl -fsSL --retry 3 -o "${RUNNER_TEMP}/hadolint" \
+            "https://github.com/hadolint/hadolint/releases/download/${HADOLINT_VERSION}/hadolint-linux-x86_64"
+          echo "${HADOLINT_SHA256}  ${RUNNER_TEMP}/hadolint" | sha256sum -c -
+          chmod +x "${RUNNER_TEMP}/hadolint"
+          "${RUNNER_TEMP}/hadolint" infra/runner/Dockerfile
+          echo "Runner OK"
 
   titulo-pr:
     name: titulo-pr

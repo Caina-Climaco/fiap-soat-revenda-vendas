@@ -86,6 +86,23 @@ def test_openapi_documenta_rotas_e_problem_json(api: Api) -> None:
     } <= set(esquema["paths"])
 
 
+def test_documentacao_com_prefixo_do_kong(settings: Settings) -> None:
+    com_prefixo = settings.model_copy(update={"docs_prefixo": "/vendas"})
+    banco = BancoMongo(mongomock.MongoClient(tz_aware=True), "x")
+    with TestClient(criar_app(com_prefixo, banco=banco)) as cliente:
+        pagina = cliente.get("/vendas/docs")
+        assert pagina.status_code == 200
+        assert "/vendas/openapi.json" in pagina.text
+        assert cliente.get("/vendas/openapi.json").json()["paths"]
+        assert cliente.get("/docs").status_code == 404
+
+
+@pytest.mark.parametrize("prefixo", ["vendas", "/vendas/", "/Vendas", "/a b"])
+def test_prefixo_da_documentacao_invalido(settings: Settings, prefixo: str) -> None:
+    with pytest.raises(ValueError, match="docs_prefixo"):
+        Settings.model_validate({**settings.model_dump(), "docs_prefixo": prefixo})
+
+
 def test_rota_inexistente_e_json_malformado(api: Api) -> None:
     assert api.http.get("/api/v1/nao-existe").json()["type"] == "about:blank"
     resposta = api.http.post(

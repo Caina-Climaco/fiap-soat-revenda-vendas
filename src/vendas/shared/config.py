@@ -38,6 +38,9 @@ class Settings(MongoSettings):
     circuito_aberto_segundos: float = Field(default=15.0, gt=0, le=600)
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    # Prefixo do Swagger e do openapi.json. No cluster é "/vendas": o Kong publica a
+    # documentação dos dois serviços na mesma porta.
+    docs_prefixo: str = Field(default="", pattern=r"^(/[a-z0-9-]+)*$")
 
     @field_validator("principal_url")
     @classmethod
