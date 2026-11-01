@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.import_linter_cache/
+.coverage
+coverage.xml
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Segredos e configuracao local (ADR-011)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+kubeconfig*
+*-kubeconfig
+*-cluster-config
+
+# Terraform (state fica fora do repositorio)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+.terraform.tfstate.lock.info
+
+# Ferramentas locais e artefatos
+.setup/
+.idea/
+.vscode/
+*.log
+*.pdf
+*.mp4
+CLAUDE.md
