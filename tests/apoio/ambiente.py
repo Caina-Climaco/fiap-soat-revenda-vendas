@@ -1,6 +1,6 @@
 """Ambiente dos testes de integração e BDD: MongoDB, a API e o principal falso.
 
-- Com `TEST_MONGO_URL` (o CI usa um MongoDB 8 real), os testes rodam contra o banco de
+- Com `TEST_MONGO_URL` (o CI usa um MongoDB 7 real), os testes rodam contra o banco de
   verdade; sem ela, contra o MongoDB simulado (mongomock), para rodar em qualquer máquina.
   As duas formas exercitam os mesmos repositórios, índices e consultas.
 - Antes de cada teste o banco é apagado e os índices recriados pela própria aplicação.

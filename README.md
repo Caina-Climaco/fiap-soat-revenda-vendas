@@ -48,7 +48,7 @@ Orquestrada por este serviço ([ADR-002](docs/adrs/ADR-002-saga-orquestrada.md))
 | Tema | Decisão |
 |---|---|
 | Stack | Python 3.12, FastAPI, Pydantic v2, PyMongo, httpx, cryptography, uv |
-| Banco | MongoDB 8: cada mudança de estado é atômica num documento; índice único parcial garante uma compra ativa por veículo ([ADR-001](docs/adrs/ADR-001-mongodb.md)) |
+| Banco | MongoDB 7: cada mudança de estado é atômica num documento; índice único parcial garante uma compra ativa por veículo ([ADR-001](docs/adrs/ADR-001-mongodb.md)) |
 | CPF (LGPD) | Validado (dígitos verificadores), cifrado com AES-256-GCM, mascarado nas respostas, fora de logs, métricas e traces; apagado de compras canceladas após 90 dias ([ADR-005](docs/adrs/ADR-005-cpf-lgpd.md)) |
 | Isolamento da saga | Trava semântica, releitura da versão e ordem dos passos ([ADR-004](docs/adrs/ADR-004-contramedidas-de-isolamento.md)) |
 | Observabilidade | Logs JSON com `request_id` e `trace_id`; métricas de compras, passos da saga, chamadas ao principal e estado do circuito em `/metrics`; OpenTelemetry quando `OTEL_EXPORTER_OTLP_ENDPOINT` está definido |
@@ -72,7 +72,7 @@ uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run
 # unidade + integração + BDD; sem TEST_MONGO_URL, o MongoDB é simulado (mongomock)
 uv run pytest -m "unit or integration or bdd" --cov=vendas --cov-branch --cov-fail-under=80
 
-# contra um MongoDB real (o CI faz assim, com mongo:8.0)
+# contra um MongoDB real (o CI faz assim, com mongo:7.0)
 export TEST_MONGO_URL=mongodb://localhost:27017
 uv run pytest -m "unit or integration or bdd"
 ```

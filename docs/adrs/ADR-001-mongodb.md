@@ -18,7 +18,7 @@ O serviço de venda precisa de banco isolado, diferente do banco do serviço pri
 
 ## Decisão
 
-- **MongoDB 8.0** num StatefulSet com PVC, instância única (standalone).
+- **MongoDB 7.0** num StatefulSet com PVC, instância única (standalone). A versão 8.x foi a primeira escolha, mas não sobe em kernel Linux 6.19 ou mais novo (bug do TCMalloc, [SERVER-121912](https://jira.mongodb.org/browse/SERVER-121912), sem correção publicada), e os runners do GitHub Actions já usam esse kernel. A 7.0 tem suporte do fabricante e atende tudo o que o serviço usa (índice único parcial, updates condicionais atômicos).
 - **Sem transações entre documentos.** Cada mudança de estado é atômica num único documento (`find_one_and_update` ou `update_one` condicionais, `replace_one` com a revisão lida). O que fica pela metade entre o anúncio e a compra é exatamente o que a saga já sabe tratar: a compra é gravada com o passo T1 marcado como iniciado **antes** da reserva, então uma queda entre as duas gravações é retomada (ou compensada) pela recuperação. Isso dispensa o replica set e mantém o modelo simples.
 - Driver **PyMongo** (síncrono, como o SQLAlchemy da Fase 3), atrás de repositórios na camada `infrastructure`; o domínio não conhece o MongoDB.
 - **Dinheiro em centavos** (inteiro): ordenação e comparação exatas, sem ponto flutuante. Identificadores como texto (UUID canônico).
@@ -45,5 +45,5 @@ O serviço de venda precisa de banco isolado, diferente do banco do serviço pri
 - A consistência entre anúncio e compra depende da saga (não de uma transação), o que exige testar as quedas no meio do caminho.
 
 ## Mitigações
-- Testes de integração rodam contra o MongoDB 8 real no CI e contra o MongoDB simulado (mongomock) na máquina de quem desenvolve, com a mesma suíte; os cenários de queda no meio da saga são testados explicitamente (`tests/integration/test_recuperacao_e_concorrencia.py`).
+- Testes de integração rodam contra o MongoDB 7 real no CI e contra o MongoDB simulado (mongomock) na máquina de quem desenvolve, com a mesma suíte; os cenários de queda no meio da saga são testados explicitamente (`tests/integration/test_recuperacao_e_concorrencia.py`).
 - Alta disponibilidade (replica set de três nós) e MongoDB gerenciado (Atlas, DocumentDB) ficam como evolução, assunto da aula de Cloud e DBaaS.

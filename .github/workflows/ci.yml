@@ -65,8 +65,9 @@ jobs:
     timeout-minutes: 20
     services:
       mongo:
-        # Mesma versao fixa do Terraform do servico (infra/terraform).
-        image: mongo:8.0
+        # Mesma versao do Terraform do servico. MongoDB 8.x nao sobe no kernel 6.19+
+        # dos runners atuais (SERVER-121912); ver docs/adrs/ADR-001-mongodb.md.
+        image: mongo:7.0
         ports:
           - 27017:27017
         options: >-
@@ -98,6 +99,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Unidade + integracao + BDD com cobertura (minimo 80%)
+        id: pytest
         run: >-
           uv run pytest -m "unit or integration or bdd"
           --cov=vendas --cov-branch
@@ -105,11 +107,11 @@ jobs:
           --cov-fail-under=80
 
       - name: Cobertura no resumo do job
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.pytest.outcome != 'skipped' }}
         run: |
           set -euo pipefail
           {
-            echo "## Cobertura (unidade + integracao + BDD), MongoDB 8 real"
+            echo "## Cobertura (unidade + integracao + BDD), MongoDB 7 real"
             echo
             echo '```'
             uv run coverage report --skip-covered | tail -n 25
@@ -117,7 +119,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publica relatorio de cobertura
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.pytest.outcome != 'skipped' }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: cobertura-${{ github.sha }}
