@@ -5,8 +5,6 @@
 !uv.lock
 !.python-version
 !src/
-!alembic.ini
-!migrations/
 
 # Mesmo dentro das pastas permitidas, nada de artefatos locais.
 **/__pycache__

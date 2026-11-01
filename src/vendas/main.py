@@ -152,6 +152,9 @@ def criar_app(
         description=DESCRICAO,
         openapi_tags=TAGS,
         lifespan=ciclo_de_vida,
+        docs_url=f"{settings.docs_prefixo}/docs",
+        openapi_url=f"{settings.docs_prefixo}/openapi.json",
+        redoc_url=None,
     )
     app.add_middleware(MetricasMiddleware, metricas=metricas)
     app.add_middleware(CorrelacaoMiddleware)

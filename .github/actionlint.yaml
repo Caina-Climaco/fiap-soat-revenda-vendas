@@ -1,0 +1,5 @@
+# Configuracao do actionlint (lint local dos workflows: `actionlint` na raiz).
+self-hosted-runner:
+  # Label do runner self-hosted (container Linux no Docker Desktop do PC do autor), usado somente pelo cd.yml.
+  labels:
+    - kind-local

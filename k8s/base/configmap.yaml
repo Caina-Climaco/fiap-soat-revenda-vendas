@@ -1,0 +1,27 @@
+# Configuracao nao sensivel do servico de venda. Os segredos vem dos Secrets criados pelo
+# Terraform deste repositorio (infra/terraform/secrets.tf): vendas-mongo, vendas-cpf e
+# vendas-tokens-servico. Usado tambem pelo CronJob de recuperacao (k8s/recuperacao).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: revenda-vendas-config
+  labels:
+    app: revenda-vendas
+    app.kubernetes.io/name: revenda-vendas
+    app.kubernetes.io/part-of: revenda-veiculos
+data:
+  MONGO_BANCO: revenda_vendas
+  # Contrato com o repositorio principal (ADR-006 da solucao): Service publicado por ele
+  PRINCIPAL_URL: http://revenda-principal.principal.svc.cluster.local:8000
+  # Swagger em http://localhost:8080/vendas/docs (rota documentacao-vendas do Kong)
+  DOCS_PREFIXO: /vendas
+  PRAZO_RESERVA_MINUTOS: "30"
+  RETENCAO_CPF_DIAS: "90"
+  # Resiliencia nas chamadas ao principal (ADR-004 da solucao)
+  HTTP_TIMEOUT_SEGUNDOS: "2"
+  HTTP_TENTATIVAS: "3"
+  CIRCUITO_LIMITE_FALHAS: "5"
+  CIRCUITO_ABERTO_SEGUNDOS: "15"
+  LOG_LEVEL: INFO
+  # Tracing: OTLP/HTTP para o OpenTelemetry Collector da plataforma (repositorio principal)
+  OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector.observabilidade.svc.cluster.local:4318

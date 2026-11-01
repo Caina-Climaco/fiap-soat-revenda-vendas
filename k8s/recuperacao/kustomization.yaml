@@ -1,0 +1,10 @@
+# CronJob de recuperacao de sagas, aplicado pelo CD DEPOIS do rollout da API. Depende do
+# ConfigMap de k8s/base.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: vendas
+resources:
+  - cronjob.yaml
+images:
+  - name: revenda-vendas
+    newTag: dev

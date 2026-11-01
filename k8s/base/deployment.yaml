@@ -1,0 +1,107 @@
+# Servico de venda. O numero de replicas e controlado pelo HPA (2..5): o campo replicas e
+# omitido para o `kubectl apply` nao brigar com ele. A saga e retomada por qualquer replica
+# ou pelo CronJob de recuperacao (lease no documento da compra, ADR-006).
+# Contrato com o CD: container "api" (kubectl set image deployment/revenda-vendas api=...).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: revenda-vendas
+  labels:
+    app: revenda-vendas
+    app.kubernetes.io/name: revenda-vendas
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: revenda-veiculos
+spec:
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: revenda-vendas
+  template:
+    metadata:
+      # Descoberta por anotacao (kubernetes_sd_configs do Prometheus). /metrics nao tem rota
+      # no Kong e a NetworkPolicy so deixa o Prometheus, o Kong e o principal entrarem.
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+      labels:
+        # "app" e o rotulo usado pelas NetworkPolicies (infra/terraform/network_policies.tf)
+        app: revenda-vendas
+        app.kubernetes.io/name: revenda-vendas
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: revenda-veiculos
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: revenda-vendas:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: revenda-vendas-config
+            # MONGO_URL (com usuario e senha da aplicacao)
+            - secretRef:
+                name: vendas-mongo
+            # CPF_CHAVE (AES-256 em base64) e CPF_CHAVE_ID
+            - secretRef:
+                name: vendas-cpf
+            # TOKEN_SERVICO_ENTRADA (principal -> venda), TOKEN_SERVICO_SAIDA (venda -> principal)
+            - secretRef:
+                name: vendas-tokens-servico
+          resources:
+            requests:
+              cpu: 100m
+              memory: 160Mi
+            limits:
+              cpu: 500m
+              memory: 320Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

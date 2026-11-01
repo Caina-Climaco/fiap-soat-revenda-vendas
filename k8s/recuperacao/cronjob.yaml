@@ -1,0 +1,78 @@
+# Recuperacao de sagas (ADR-006 deste servico): `python -m vendas.recuperacao` a cada minuto.
+# Expira reservas vencidas (C3 como arbitro), retoma sagas paradas, repete passos e
+# compensacoes adiados e apaga o CPF de compras canceladas alem da retencao. Termina com 0
+# mesmo com o principal fora: o que falhou fica agendado para a proxima execucao.
+# Forbid: nunca duas execucoes ao mesmo tempo (o lease ja impede passos duplicados; isto
+# so evita trabalho em dobro). Mesma imagem e mesma configuracao da API.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: revenda-vendas-recuperacao
+  labels:
+    app: revenda-vendas-recuperacao
+    app.kubernetes.io/name: revenda-vendas-recuperacao
+    app.kubernetes.io/component: recuperacao
+    app.kubernetes.io/part-of: revenda-veiculos
+spec:
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 30
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 55
+      ttlSecondsAfterFinished: 300
+      template:
+        metadata:
+          labels:
+            # "app" e o rotulo usado pelas NetworkPolicies (deste repositorio e do principal)
+            app: revenda-vendas-recuperacao
+            app.kubernetes.io/name: revenda-vendas-recuperacao
+            app.kubernetes.io/component: recuperacao
+            app.kubernetes.io/part-of: revenda-veiculos
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: recuperacao
+              image: revenda-vendas:dev
+              imagePullPolicy: IfNotPresent
+              command: ["python", "-m", "vendas.recuperacao"]
+              envFrom:
+                - configMapRef:
+                    name: revenda-vendas-config
+                - secretRef:
+                    name: vendas-mongo
+                - secretRef:
+                    name: vendas-cpf
+                - secretRef:
+                    name: vendas-tokens-servico
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 96Mi
+                limits:
+                  cpu: 500m
+                  memory: 256Mi
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+          volumes:
+            - name: tmp
+              emptyDir:
+                sizeLimit: 64Mi
