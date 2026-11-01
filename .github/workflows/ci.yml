@@ -133,6 +133,55 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # Contratos das rotas internas (ADR-008 da solucao): este servico cumpre o contrato que
+  # publica (contratos/vendas-interno.openapi.json) e usa o do outro servico como ele esta na main de la.
+  contrato:
+    name: contrato
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Dependencias (uv.lock congelado)
+        run: uv sync --frozen
+
+      # Provedor: o contrato publicado e o da aplicacao e as respostas reais o cumprem.
+      # Consumidor: as chamadas ao outro servico (e o falso dele nos testes) cumprem a copia.
+      - name: Testes de contrato (provedor e consumidor)
+        run: uv run pytest -m contrato -v
+
+      # A copia local do contrato do outro servico tem de ser a publicada na main dele: se
+      # ele mudou uma rota interna, este repositorio precisa de PR para acompanhar.
+      - name: Copia do contrato de principal igual a publicada
+        run: |
+          set -euo pipefail
+          url="https://raw.githubusercontent.com/Caina-Climaco/fiap-soat-revenda-principal/main/contratos/principal-interno.openapi.json"
+          codigo="$(curl -sSL --retry 3 -o "${RUNNER_TEMP}/publicado.json" -w '%{http_code}' "$url")"
+          if [ "$codigo" = "404" ]; then
+            echo "::warning::principal ainda nao publica contratos/principal-interno.openapi.json na main; comparacao pulada."
+            exit 0
+          fi
+          [ "$codigo" = "200" ] || { echo "::error::Falha ao baixar $url (HTTP $codigo)"; exit 1; }
+          if ! diff -u "${RUNNER_TEMP}/publicado.json" contratos/principal-interno.openapi.json; then
+            echo "::error file=contratos/principal-interno.openapi.json::copia diferente do contrato publicado pelo repositorio principal"
+            exit 1
+          fi
+          echo "contratos/principal-interno.openapi.json identico ao publicado"
+
   # Analise estatica e Quality Gate no SonarCloud (ADR-008 da solucao), com a cobertura do job testes.
   # PR de fork nao recebe o SONAR_TOKEN: o job e pulado (o gate de 80% do pytest continua).
   sonarcloud:

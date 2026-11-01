@@ -29,6 +29,7 @@ class VeiculoFalso:
 class CobrancaFalsa:
     codigo: str
     status: str = "PENDENTE"
+    valor: str | None = None
 
 
 @dataclass
@@ -80,19 +81,24 @@ class PrincipalFalso:
     # ------------------------------------------------------------ catálogo
 
     def _veiculos(self, metodo: str, partes: list[str], corpo: dict[str, Any]) -> httpx.Response:
-        veiculo = self.veiculo(partes[1])
+        veiculo_id = partes[1]
+        veiculo = self.veiculo(veiculo_id)
+
+        def _ok(efeito: bool) -> httpx.Response:
+            return _passo(veiculo_id, veiculo, efeito)
+
         if partes[2] == "bloqueio" and metodo == "POST":
             compra = corpo["compra_id"]
             if compra in self.compensadas:
                 return _problema(409, "compra-compensada")
             if veiculo.compra_id == compra:
-                return _ok(veiculo)
+                return _ok(efeito=False)
             if veiculo.status != "A_VENDA":
                 return _problema(409, "veiculo-indisponivel")
             if corpo["versao"] != veiculo.versao:
                 return _problema(409, "versao-divergente")
             veiculo.status, veiculo.compra_id = "BLOQUEADO", compra
-            return _ok(veiculo)
+            return _ok(efeito=True)
         if partes[2] == "bloqueio":  # DELETE .../bloqueio/{compra_id}
             compra = partes[3]
             self.compensadas.add(compra)
@@ -100,12 +106,15 @@ class PrincipalFalso:
                 if veiculo.status == "VENDIDO":
                     return _problema(409, "veiculo-ja-vendido")
                 veiculo.status, veiculo.compra_id = "A_VENDA", None
-            return _ok(veiculo)
+                return _ok(efeito=True)
+            return _ok(efeito=False)
         # POST .../venda
         if veiculo.compra_id != corpo["compra_id"]:
             return _problema(409, "bloqueio-de-outra-compra")
+        if veiculo.status == "VENDIDO":
+            return _ok(efeito=False)
         veiculo.status = "VENDIDO"
-        return _ok(veiculo)
+        return _ok(efeito=True)
 
     # ------------------------------------------------------------ pagamentos
 
@@ -116,10 +125,10 @@ class PrincipalFalso:
             if existente is not None:
                 if existente.status == "CANCELADA" and compra in self.compensadas:
                     return _problema(409, "compra-compensada")
-                return httpx.Response(200, json=_cobranca(compra, existente))
-            nova = CobrancaFalsa(codigo=f"PAG-{secrets.token_hex(6)}")
+                return httpx.Response(200, json=_cobranca(compra, existente, efeito=False))
+            nova = CobrancaFalsa(codigo=f"PAG-{secrets.token_hex(6)}", valor=corpo["valor"])
             self.cobrancas[compra] = nova
-            return httpx.Response(201, json=_cobranca(compra, nova))
+            return httpx.Response(201, json=_cobranca(compra, nova, efeito=True))
         compra = partes[1]  # POST /cobrancas/{compra_id}/cancelamento
         cobranca = self.cobrancas.setdefault(
             compra, CobrancaFalsa(codigo=f"PAG-{secrets.token_hex(6)}", status="CANCELADA")
@@ -127,24 +136,45 @@ class PrincipalFalso:
         if cobranca.status == "PAGA":
             return _problema(409, "cobranca-ja-paga")
         self.compensadas.add(compra)
+        efeito = cobranca.status != "CANCELADA"
         cobranca.status = "CANCELADA"
-        return httpx.Response(200, json=_cobranca(compra, cobranca))
+        return httpx.Response(200, json=_cobranca(compra, cobranca, efeito=efeito))
 
 
-def _ok(veiculo: VeiculoFalso) -> httpx.Response:
+def _passo(veiculo_id: str, veiculo: VeiculoFalso, efeito: bool) -> httpx.Response:
+    """PassoSagaResposta do contrato do principal."""
     return httpx.Response(
         200,
-        json={"status": veiculo.status, "versao": veiculo.versao, "compra_id": veiculo.compra_id},
+        json={
+            "veiculo_id": veiculo_id,
+            "status": veiculo.status,
+            "versao": veiculo.versao,
+            "compra_id": veiculo.compra_id,
+            "efeito": efeito,
+        },
     )
 
 
-def _cobranca(compra: str, cobranca: CobrancaFalsa) -> dict[str, Any]:
-    return {"codigo_pagamento": cobranca.codigo, "compra_id": compra, "status": cobranca.status}
+def _cobranca(compra: str, cobranca: CobrancaFalsa, *, efeito: bool) -> dict[str, Any]:
+    """CobrancaResposta do contrato do principal."""
+    return {
+        "codigo_pagamento": cobranca.codigo,
+        "compra_id": compra,
+        "valor": cobranca.valor,
+        "status": cobranca.status,
+        "efeito": efeito,
+    }
 
 
 def _problema(status: int, tipo: str) -> httpx.Response:
     return httpx.Response(
         status,
-        json={"type": f"urn:revenda:problema:{tipo}", "title": tipo, "status": status},
+        json={
+            "type": f"urn:revenda:problema:{tipo}",
+            "title": tipo,
+            "status": status,
+            "detail": f"Recusa simulada: {tipo}.",
+            "instance": "/internal/v1",
+        },
         headers={"content-type": PROBLEMA},
     )

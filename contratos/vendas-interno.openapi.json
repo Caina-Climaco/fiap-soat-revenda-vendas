@@ -1,0 +1,519 @@
+{
+  "components": {
+    "schemas": {
+      "CompraResposta": {
+        "properties": {
+          "codigo_pagamento": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codigo Pagamento"
+          },
+          "cpf": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sempre mascarado; nulo após o prazo de retenção.",
+            "title": "Cpf"
+          },
+          "criada_em": {
+            "examples": [
+              "2026-10-03T14:05:00Z"
+            ],
+            "format": "date-time",
+            "title": "Criada Em",
+            "type": "string"
+          },
+          "data_venda": {
+            "anyOf": [
+              {
+                "examples": [
+                  "2026-10-03T14:05:00Z"
+                ],
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Venda"
+          },
+          "expira_em": {
+            "examples": [
+              "2026-10-03T14:05:00Z"
+            ],
+            "format": "date-time",
+            "title": "Expira Em",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "motivo_cancelamento": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MotivoCancelamento"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "preco": {
+            "examples": [
+              "124900.00"
+            ],
+            "pattern": "^\\d{1,10}\\.\\d{2}$",
+            "title": "Preco",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/StatusCompra"
+          },
+          "veiculo": {
+            "$ref": "#/components/schemas/VeiculoDaCompra"
+          },
+          "veiculo_id": {
+            "format": "uuid",
+            "title": "Veiculo Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "veiculo_id",
+          "veiculo",
+          "preco",
+          "cpf",
+          "status",
+          "codigo_pagamento",
+          "criada_em",
+          "expira_em",
+          "data_venda",
+          "motivo_cancelamento"
+        ],
+        "title": "CompraResposta",
+        "type": "object"
+      },
+      "ErroCampo": {
+        "properties": {
+          "campo": {
+            "title": "Campo",
+            "type": "string"
+          },
+          "mensagem": {
+            "title": "Mensagem",
+            "type": "string"
+          }
+        },
+        "required": [
+          "campo",
+          "mensagem"
+        ],
+        "title": "ErroCampo",
+        "type": "object"
+      },
+      "MotivoCancelamento": {
+        "enum": [
+          "PAGAMENTO_CANCELADO",
+          "RESERVA_EXPIRADA",
+          "ANUNCIO_ALTERADO",
+          "VEICULO_INDISPONIVEL",
+          "FALHA_PROCESSAMENTO"
+        ],
+        "title": "MotivoCancelamento",
+        "type": "string"
+      },
+      "Problema": {
+        "description": "Problem Details (RFC 9457) com as extensões `request_id` e `erros`.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "erros": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ErroCampo"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Erros"
+          },
+          "instance": {
+            "title": "Instance",
+            "type": "string"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Request Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance"
+        ],
+        "title": "Problema",
+        "type": "object"
+      },
+      "ReplicaAnuncio": {
+        "additionalProperties": false,
+        "properties": {
+          "ano": {
+            "maximum": 2100.0,
+            "minimum": 1950.0,
+            "title": "Ano",
+            "type": "integer"
+          },
+          "cor": {
+            "maxLength": 30,
+            "minLength": 1,
+            "title": "Cor",
+            "type": "string"
+          },
+          "criado_em": {
+            "format": "date-time",
+            "title": "Criado Em",
+            "type": "string"
+          },
+          "marca": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Marca",
+            "type": "string"
+          },
+          "modelo": {
+            "maxLength": 60,
+            "minLength": 1,
+            "title": "Modelo",
+            "type": "string"
+          },
+          "preco": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,13}0*$)\\d{0,10}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "title": "Preco"
+          },
+          "versao": {
+            "minimum": 1.0,
+            "title": "Versao",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "versao",
+          "marca",
+          "modelo",
+          "ano",
+          "cor",
+          "preco",
+          "criado_em"
+        ],
+        "title": "ReplicaAnuncio",
+        "type": "object"
+      },
+      "ReplicaAplicada": {
+        "properties": {
+          "aplicado": {
+            "description": "False quando a versão recebida não era mais nova.",
+            "title": "Aplicado",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "aplicado"
+        ],
+        "title": "ReplicaAplicada",
+        "type": "object"
+      },
+      "ResultadoPagamentoRequisicao": {
+        "additionalProperties": false,
+        "properties": {
+          "codigo_pagamento": {
+            "pattern": "^PAG-[0-9a-f]{12}$",
+            "title": "Codigo Pagamento",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "PAGO",
+              "CANCELADO"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "codigo_pagamento",
+          "status"
+        ],
+        "title": "ResultadoPagamentoRequisicao",
+        "type": "object"
+      },
+      "StatusCompra": {
+        "enum": [
+          "PROCESSANDO",
+          "AGUARDANDO_PAGAMENTO",
+          "EFETIVADA",
+          "CANCELADA"
+        ],
+        "title": "StatusCompra",
+        "type": "string"
+      },
+      "VeiculoDaCompra": {
+        "properties": {
+          "ano": {
+            "title": "Ano",
+            "type": "integer"
+          },
+          "cor": {
+            "title": "Cor",
+            "type": "string"
+          },
+          "marca": {
+            "title": "Marca",
+            "type": "string"
+          },
+          "modelo": {
+            "title": "Modelo",
+            "type": "string"
+          }
+        },
+        "required": [
+          "marca",
+          "modelo",
+          "ano",
+          "cor"
+        ],
+        "title": "VeiculoDaCompra",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "token-servico": {
+        "description": "Segredo compartilhado entre os serviços (rotas internas).",
+        "in": "header",
+        "name": "X-Service-Token",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "title": "Revenda de Veiculos: rotas internas do servico de venda",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/internal/v1/anuncios/{veiculo_id}": {
+      "put": {
+        "description": "Aplica só versão mais nova; nunca altera a disponibilidade.",
+        "operationId": "replicar_internal_v1_anuncios__veiculo_id__put",
+        "parameters": [
+          {
+            "description": "Identificador do veículo (UUID).",
+            "in": "path",
+            "name": "veiculo_id",
+            "required": true,
+            "schema": {
+              "description": "Identificador do veículo (UUID).",
+              "format": "uuid",
+              "title": "Veiculo Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplicaAnuncio"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplicaAplicada"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Token de serviço ausente ou inválido"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Dados inválidos"
+          }
+        },
+        "security": [
+          {
+            "token-servico": []
+          }
+        ],
+        "summary": "Réplica do anúncio",
+        "tags": [
+          "Interno: principal"
+        ]
+      }
+    },
+    "/internal/v1/compras/{compra_id}/resultado-pagamento": {
+      "post": {
+        "description": "Registra o resultado e tenta avançar a saga na hora; o que faltar fica para a recuperação. Repetição: 200 sem efeito. Compra desconhecida: 404 (a outbox tenta de novo).",
+        "operationId": "resultado_internal_v1_compras__compra_id__resultado_pagamento_post",
+        "parameters": [
+          {
+            "description": "Identificador da compra (UUID).",
+            "in": "path",
+            "name": "compra_id",
+            "required": true,
+            "schema": {
+              "description": "Identificador da compra (UUID).",
+              "format": "uuid",
+              "title": "Compra Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResultadoPagamentoRequisicao"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompraResposta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Token de serviço ausente ou inválido"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Recurso não encontrado"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Conflito de estado"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Dados inválidos"
+          }
+        },
+        "security": [
+          {
+            "token-servico": []
+          }
+        ],
+        "summary": "Resultado do pagamento (repasse do principal)",
+        "tags": [
+          "Interno: principal"
+        ]
+      }
+    }
+  }
+}
