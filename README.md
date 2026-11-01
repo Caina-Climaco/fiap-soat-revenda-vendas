@@ -76,6 +76,9 @@ uv run pytest -m "unit or integration or bdd" --cov=vendas --cov-branch --cov-fa
 # contratos das rotas internas com o principal (contratos/README.md)
 uv run pytest -m contrato
 
+# carga das listagens contra o ambiente no kind (RNF-10: p95 < 300 ms), no PowerShell
+# powershell -ExecutionPolicy Bypass -File .\scripts\windows\carga-listagens.ps1
+
 # contra um MongoDB real (o CI faz assim, com mongo:7.0)
 export TEST_MONGO_URL=mongodb://localhost:27017
 uv run pytest -m "unit or integration or bdd"

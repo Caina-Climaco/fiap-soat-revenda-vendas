@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from typing import Any
 
@@ -15,6 +18,7 @@ from apoio.principal_falso import PrincipalFalso
 from vendas import recuperacao
 from vendas.composicao import Componentes
 from vendas.domain.compra import Passo, StatusCompra
+from vendas.domain.erros import VeiculoIndisponivelError
 from vendas.domain.repositorio import ConflitoRevisaoError
 from vendas.infrastructure.repositorio_mongo import MongoCompraRepository
 from vendas.shared.clock import RelogioFixo
@@ -118,3 +122,30 @@ def test_main_do_cronjob(
     banco = BancoMongo(cliente_mongo, "revenda_vendas_cronjob")
     assert recuperacao.main([], banco=banco) == 0
     assert "ux_compra_ativa_por_veiculo" in banco.db.compras.index_information()
+
+
+@pytest.mark.skipif(
+    not os.environ.get("TEST_MONGO_URL"),
+    reason="concorrencia de verdade exige o MongoDB real (o CI roda com TEST_MONGO_URL)",
+)
+def test_compras_simultaneas_do_mesmo_veiculo_so_uma_vence(
+    api: Api, componentes: Componentes
+) -> None:
+    """RNF-02: N compradores ao mesmo tempo; exatamente uma compra fica ativa."""
+    veiculo = api.replicar()
+    casos_uso = componentes.casos_uso
+    largada = threading.Barrier(10)
+
+    def tentar() -> str:
+        largada.wait()
+        try:
+            compra = casos_uso.iniciar_compra.executar(uuid.UUID(veiculo), 1, "52998224725")
+        except VeiculoIndisponivelError:
+            return "recusada"
+        return compra.status.value
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        resultados = list(executor.map(lambda _: tentar(), range(10)))
+    assert resultados.count("AGUARDANDO_PAGAMENTO") == 1
+    assert resultados.count("recusada") == 9
+    assert api.anuncio(veiculo)["status"] == "RESERVADO"
