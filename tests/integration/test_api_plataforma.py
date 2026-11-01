@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import uuid
 
+import httpx
 import mongomock
 import pytest
 from fastapi import FastAPI
@@ -13,6 +14,8 @@ import vendas.main
 from apoio.api import Api, tipo_problema
 from apoio.cenario import CHAVE_CPF, TOKEN_ENTRADA, TOKEN_SAIDA
 from apoio.principal_falso import PrincipalFalso
+from vendas.application.portas import ParticipanteIndisponivelError
+from vendas.infrastructure.resiliencia import EstadoCircuito
 from vendas.main import criar_app
 from vendas.shared.config import Settings
 from vendas.shared.mongo import BancoMongo
@@ -75,6 +78,7 @@ def test_app_do_uvicorn_e_criado_sob_demanda(monkeypatch: pytest.MonkeyPatch) ->
 def test_openapi_documenta_rotas_e_problem_json(api: Api) -> None:
     esquema = api.http.get("/openapi.json").json()
     assert esquema["components"]["securitySchemes"]["token-servico"]["name"] == "X-Service-Token"
+    assert api.http.get("/openapi.json").json() == esquema  # montado uma vez, reaproveitado
     assert "Problema" in esquema["components"]["schemas"]
     assert {
         "/api/v1/veiculos/a-venda",
@@ -145,3 +149,18 @@ def test_conexao_real_com_mongo_inacessivel_falha_rapido() -> None:
         assert banco.disponivel() is False
     finally:
         banco.fechar()
+
+
+def test_cliente_do_principal_sem_metricas(settings: Settings) -> None:
+    """O CronJob monta o cliente sem métricas: abrir o circuito não pode quebrar."""
+    falhando = httpx.MockTransport(lambda _r: httpx.Response(503))
+    cliente = vendas.main.criar_cliente_principal(
+        settings, None, transporte=falhando, dormir=lambda _s: None
+    )
+    try:
+        for _ in range(settings.circuito_limite_falhas):
+            with pytest.raises(ParticipanteIndisponivelError):
+                cliente.chamar("POST", "/internal/v1/cobrancas", {})
+        assert cliente.circuito.estado is EstadoCircuito.ABERTO
+    finally:
+        cliente.fechar()

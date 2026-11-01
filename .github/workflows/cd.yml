@@ -305,6 +305,23 @@ jobs:
           "$VENV_PY" -m pytest tests/e2e -m e2e -p no:cacheprovider -o addopts="" \
             -v -rA --junitxml="${WORK_TMP}/e2e-junit.xml"
 
+      # RNF-10: p95 das listagens abaixo de 300 ms pelo Kong. O k6 roda num container irmao
+      # do runner, na rede do kind; o script vai pela entrada padrao (o caminho do checkout
+      # existe so dentro do container do runner, nao no Docker do host).
+      - name: Carga das listagens (k6, RNF-10)
+        id: carga
+        run: |
+          set -euo pipefail
+          saida="${WORK_TMP}/k6.txt"
+          if ! docker run --rm -i --network kind -e BASE_URL="$E2E_GATEWAY_URL" grafana/k6:2.2.0 \
+              run --quiet - < tests/carga/listagens.js > "$saida" 2>&1; then
+            cat "$saida"
+            echo "::error::Teste de carga reprovado (p95 >= 300 ms ou falhas >= 1%)"
+            exit 1
+          fi
+          cat "$saida"
+          grep -E "p\(95\)<300|rate<0.01" "$saida" | sed 's/^ *//' > "${WORK_TMP}/k6-limites.txt" || true
+
       - name: Diagnostico em falha
         if: ${{ failure() }}
         run: |
@@ -346,6 +363,10 @@ jobs:
               linha="$(grep -o '<testsuite [^>]*>' "${WORK_TMP}/e2e-junit.xml" | head -n 1)"
               attr() { printf '%s' "$linha" | sed -n "s/.* $1=\"\([^\"]*\)\".*/\1/p"; }
               echo "| Testes e2e | $(attr tests) total, $(attr failures) falhas, $(attr errors) erros, $(attr skipped) pulados |"
+            fi
+            echo "| Carga das listagens (k6) | ${{ steps.carga.outcome || 'nao executado' }} |"
+            if [ -s "${WORK_TMP:-/nonexistent}/k6-limites.txt" ]; then
+              while read -r linha; do echo "| Limite k6 | \`${linha}\` |"; done < "${WORK_TMP}/k6-limites.txt"
             fi
             echo "| Kong (no PC) | http://localhost:8080 (vitrine em /api/v1/veiculos/a-venda, Swagger em /vendas/docs) |"
             echo "| Grafana / Prometheus / Jaeger (no PC) | http://localhost:3000 / http://localhost:9090 / http://localhost:16686 |"

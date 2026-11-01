@@ -70,6 +70,8 @@ def test_tracing_ligado_instrumenta_app_mongo_e_httpx(monkeypatch: pytest.Monkey
         # Uma segunda chamada (outro app no mesmo processo) reaproveita o provedor.
         assert tracing.configurar_tracing("teste", app=FastAPI())
         assert trace.get_tracer_provider() is provedor
+        # Sem app (o CronJob de recuperação): só o provedor, o httpx e o PyMongo.
+        assert tracing.configurar_tracing("teste")
     finally:
         HTTPXClientInstrumentor().uninstrument()
         PymongoInstrumentor().uninstrument()
