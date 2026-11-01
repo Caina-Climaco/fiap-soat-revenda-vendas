@@ -27,6 +27,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "import-linter>=2.15,<3",
+    "jsonschema>=4.23,<5",
     "mongomock>=4.3",
     "mypy>=2.4.0,<3",
     "pytest>=9.1.1,<10",

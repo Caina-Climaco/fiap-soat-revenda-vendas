@@ -1,0 +1,701 @@
+{
+  "components": {
+    "schemas": {
+      "BloqueioRequisicao": {
+        "additionalProperties": false,
+        "properties": {
+          "compra_id": {
+            "description": "Compra que pede o bloqueio (chave de idempotência).",
+            "format": "uuid",
+            "title": "Compra Id",
+            "type": "string"
+          },
+          "versao": {
+            "description": "Versão do anúncio que o comprador viu (RN-12).",
+            "minimum": 1.0,
+            "title": "Versao",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "compra_id",
+          "versao"
+        ],
+        "title": "BloqueioRequisicao",
+        "type": "object"
+      },
+      "CobrancaRequisicao": {
+        "additionalProperties": false,
+        "properties": {
+          "compra_id": {
+            "description": "Compra cobrada (chave de idempotência do passo T3).",
+            "format": "uuid",
+            "title": "Compra Id",
+            "type": "string"
+          },
+          "valor": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*(?:\\d{0,10}|(?=[\\d.]{1,13}0*$)\\d{0,10}\\.\\d{0,2}0*$)",
+                "type": "string"
+              }
+            ],
+            "description": "Preço congelado da compra, como string decimal.",
+            "examples": [
+              "119900.00"
+            ],
+            "title": "Valor"
+          }
+        },
+        "required": [
+          "compra_id",
+          "valor"
+        ],
+        "title": "CobrancaRequisicao",
+        "type": "object"
+      },
+      "CobrancaResposta": {
+        "properties": {
+          "codigo_pagamento": {
+            "title": "Codigo Pagamento",
+            "type": "string"
+          },
+          "compra_id": {
+            "format": "uuid",
+            "title": "Compra Id",
+            "type": "string"
+          },
+          "efeito": {
+            "description": "False quando o pedido repetiu um passo já aplicado.",
+            "title": "Efeito",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/StatusCobranca"
+          },
+          "valor": {
+            "anyOf": [
+              {
+                "examples": [
+                  "124900.00"
+                ],
+                "pattern": "^\\d{1,10}\\.\\d{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valor"
+          }
+        },
+        "required": [
+          "codigo_pagamento",
+          "compra_id",
+          "valor",
+          "status",
+          "efeito"
+        ],
+        "title": "CobrancaResposta",
+        "type": "object"
+      },
+      "ErroCampo": {
+        "properties": {
+          "campo": {
+            "title": "Campo",
+            "type": "string"
+          },
+          "mensagem": {
+            "title": "Mensagem",
+            "type": "string"
+          }
+        },
+        "required": [
+          "campo",
+          "mensagem"
+        ],
+        "title": "ErroCampo",
+        "type": "object"
+      },
+      "PassoSagaResposta": {
+        "properties": {
+          "compra_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compra Id"
+          },
+          "efeito": {
+            "description": "False quando o pedido repetiu um passo já aplicado.",
+            "title": "Efeito",
+            "type": "boolean"
+          },
+          "status": {
+            "$ref": "#/components/schemas/StatusVeiculo"
+          },
+          "veiculo_id": {
+            "format": "uuid",
+            "title": "Veiculo Id",
+            "type": "string"
+          },
+          "versao": {
+            "title": "Versao",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "veiculo_id",
+          "status",
+          "versao",
+          "compra_id",
+          "efeito"
+        ],
+        "title": "PassoSagaResposta",
+        "type": "object"
+      },
+      "Problema": {
+        "description": "Problem Details (RFC 9457) com as extensões `request_id` e `erros`.",
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "erros": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ErroCampo"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Erros"
+          },
+          "instance": {
+            "title": "Instance",
+            "type": "string"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Request Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance"
+        ],
+        "title": "Problema",
+        "type": "object"
+      },
+      "StatusCobranca": {
+        "enum": [
+          "PENDENTE",
+          "PAGA",
+          "CANCELADA"
+        ],
+        "title": "StatusCobranca",
+        "type": "string"
+      },
+      "StatusVeiculo": {
+        "enum": [
+          "A_VENDA",
+          "BLOQUEADO",
+          "VENDIDO"
+        ],
+        "title": "StatusVeiculo",
+        "type": "string"
+      },
+      "VendaRequisicao": {
+        "additionalProperties": false,
+        "properties": {
+          "compra_id": {
+            "description": "Compra que detém o bloqueio.",
+            "format": "uuid",
+            "title": "Compra Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "compra_id"
+        ],
+        "title": "VendaRequisicao",
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "token-servico": {
+        "description": "Segredo compartilhado entre os serviços (rotas internas).",
+        "in": "header",
+        "name": "X-Service-Token",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "title": "Revenda de Veiculos: rotas internas do servico principal",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/internal/v1/cobrancas": {
+      "post": {
+        "description": "Idempotente pela compra_id: a primeira chamada responde 201; repetições respondem 200 com a mesma cobrança. Depois da compensação, 409.",
+        "operationId": "gerar_internal_v1_cobrancas_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CobrancaRequisicao"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CobrancaResposta"
+                }
+              }
+            },
+            "description": "Repetição: a cobrança já existia (efeito false)"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CobrancaResposta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Credencial ausente ou inválida"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Conflito de estado"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Dados inválidos"
+          }
+        },
+        "security": [
+          {
+            "token-servico": []
+          }
+        ],
+        "summary": "T3: gerar a cobrança da compra",
+        "tags": [
+          "Interno: saga da compra"
+        ]
+      }
+    },
+    "/internal/v1/cobrancas/{compra_id}/cancelamento": {
+      "post": {
+        "description": "Compensação. Cobrança já paga → 409 cobranca-ja-paga (o pivô aconteceu e a saga deve seguir em frente). Sem cobrança, grava a marca de compensação.",
+        "operationId": "cancelar_internal_v1_cobrancas__compra_id__cancelamento_post",
+        "parameters": [
+          {
+            "description": "Identificador da compra (UUID).",
+            "in": "path",
+            "name": "compra_id",
+            "required": true,
+            "schema": {
+              "description": "Identificador da compra (UUID).",
+              "format": "uuid",
+              "title": "Compra Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CobrancaResposta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Credencial ausente ou inválida"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Conflito de estado"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Dados inválidos"
+          }
+        },
+        "security": [
+          {
+            "token-servico": []
+          }
+        ],
+        "summary": "C3: cancelar a cobrança da compra",
+        "tags": [
+          "Interno: saga da compra"
+        ]
+      }
+    },
+    "/internal/v1/veiculos/{veiculo_id}/bloqueio": {
+      "post": {
+        "description": "Idempotente pela compra_id; confere a versão vista pelo comprador.",
+        "operationId": "bloquear_internal_v1_veiculos__veiculo_id__bloqueio_post",
+        "parameters": [
+          {
+            "description": "Identificador do veículo (UUID).",
+            "in": "path",
+            "name": "veiculo_id",
+            "required": true,
+            "schema": {
+              "description": "Identificador do veículo (UUID).",
+              "format": "uuid",
+              "title": "Veiculo Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BloqueioRequisicao"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassoSagaResposta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Credencial ausente ou inválida"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Recurso não encontrado"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Conflito de estado"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Dados inválidos"
+          }
+        },
+        "security": [
+          {
+            "token-servico": []
+          }
+        ],
+        "summary": "T2: bloquear veículo para a compra",
+        "tags": [
+          "Interno: saga da compra"
+        ]
+      }
+    },
+    "/internal/v1/veiculos/{veiculo_id}/bloqueio/{compra_id}": {
+      "delete": {
+        "description": "Compensação. Sem bloqueio dessa compra, responde 200 sem efeito; em qualquer caso, a compra passa a ser recusada em novos pedidos de bloqueio.",
+        "operationId": "desbloquear_internal_v1_veiculos__veiculo_id__bloqueio__compra_id__delete",
+        "parameters": [
+          {
+            "description": "Identificador do veículo (UUID).",
+            "in": "path",
+            "name": "veiculo_id",
+            "required": true,
+            "schema": {
+              "description": "Identificador do veículo (UUID).",
+              "format": "uuid",
+              "title": "Veiculo Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identificador da compra (UUID).",
+            "in": "path",
+            "name": "compra_id",
+            "required": true,
+            "schema": {
+              "description": "Identificador da compra (UUID).",
+              "format": "uuid",
+              "title": "Compra Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassoSagaResposta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Credencial ausente ou inválida"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Recurso não encontrado"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Conflito de estado"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Dados inválidos"
+          }
+        },
+        "security": [
+          {
+            "token-servico": []
+          }
+        ],
+        "summary": "C2: desfazer o bloqueio da compra",
+        "tags": [
+          "Interno: saga da compra"
+        ]
+      }
+    },
+    "/internal/v1/veiculos/{veiculo_id}/venda": {
+      "post": {
+        "description": "Passo retentável (depois do pivô); idempotente pela compra_id.",
+        "operationId": "vender_internal_v1_veiculos__veiculo_id__venda_post",
+        "parameters": [
+          {
+            "description": "Identificador do veículo (UUID).",
+            "in": "path",
+            "name": "veiculo_id",
+            "required": true,
+            "schema": {
+              "description": "Identificador do veículo (UUID).",
+              "format": "uuid",
+              "title": "Veiculo Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VendaRequisicao"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassoSagaResposta"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Credencial ausente ou inválida"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Recurso não encontrado"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Conflito de estado"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problema"
+                }
+              }
+            },
+            "description": "Dados inválidos"
+          }
+        },
+        "security": [
+          {
+            "token-servico": []
+          }
+        ],
+        "summary": "T6: marcar o veículo como vendido",
+        "tags": [
+          "Interno: saga da compra"
+        ]
+      }
+    }
+  }
+}
