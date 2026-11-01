@@ -7,11 +7,11 @@ from datetime import timedelta
 
 import pytest
 
-from apoio.api import Api
+from apoio.api import Api, tipo_problema
 from apoio.principal_falso import PrincipalFalso
 from vendas.composicao import Componentes
-from vendas.domain.compra import Compra
-from vendas.domain.repositorio import ConflitoRevisaoError
+from vendas.domain.compra import Compra, ResultadoPagamento
+from vendas.domain.repositorio import ConflitoRevisaoError, ResultadoReserva
 from vendas.shared.clock import RelogioFixo
 from vendas.shared.mongo import BancoMongo
 
@@ -102,3 +102,65 @@ def test_anomalias_depois_do_pivo_sao_registradas_sem_travar(
     texto = api.http.get("/metrics").text
     assert 'resultado="ANOMALIA_ANUNCIO"' in texto
     assert 'resultado="RECUSADO:bloqueio-de-outra-compra"' in texto
+
+
+# ---------------------------------------------------------------- caminhos raros da saga
+
+
+def test_reserva_perdida_entre_a_leitura_e_o_t1(
+    api: Api, componentes: Componentes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """O anúncio mudou entre a conferência da versão e o T1: a compra é cancelada sem
+    chamar o principal."""
+    veiculo = api.replicar()
+    monkeypatch.setattr(
+        componentes.orquestrador._anuncios,
+        "reservar",
+        lambda *_a: ResultadoReserva.VERSAO_DIVERGENTE,
+    )
+    resposta = api.comprar(veiculo)
+    assert resposta.status_code == 409
+    assert tipo_problema(resposta) == "anuncio-alterado"
+
+
+def test_saga_no_backoff_nao_tenta_antes_da_hora(
+    api: Api, principal: PrincipalFalso, componentes: Componentes
+) -> None:
+    veiculo = api.replicar()
+    principal.fora_do_ar = True
+    assert api.comprar(veiculo).status_code == 503  # C2 ficou agendado
+    compra_id = principal.caminhos("bloqueio")[-1].split("/")[-1]  # DELETE do C2
+    compra = componentes.orquestrador._compras.obter(uuid.UUID(compra_id))
+    assert compra is not None
+    chamadas = len(principal.chamadas)
+    componentes.orquestrador.avancar(compra)
+    assert len(principal.chamadas) == chamadas
+
+
+def test_conflito_de_revisao_sem_fim_nao_prende_a_requisicao(
+    api: Api, componentes: Componentes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Se o documento muda a cada gravação, a saga desiste depois de um número fixo de
+    ações e deixa o resto para a recuperação."""
+    veiculo = api.replicar()
+
+    def sempre_em_conflito(_compra: object) -> None:
+        raise ConflitoRevisaoError
+
+    monkeypatch.setattr(componentes.orquestrador._compras, "salvar", sempre_em_conflito)
+    resposta = api.comprar(veiculo)
+    assert resposta.status_code == 201
+    assert resposta.json()["status"] == "PROCESSANDO"
+
+
+def test_resultado_disputado_com_outro_repasse(
+    api: Api, principal: PrincipalFalso, componentes: Componentes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Outro processo grava o resultado entre a leitura e a escrita: relê até 3 vezes e
+    segue sem gravar de novo."""
+    compra = api.compra_ok(api.replicar())
+    caso_uso = componentes.casos_uso.registrar_resultado
+    monkeypatch.setattr(caso_uso._compras, "registrar_resultado", lambda *_a: False)
+    codigo = principal.cobrancas[compra["id"]].codigo
+    resultado = caso_uso.executar(uuid.UUID(compra["id"]), codigo, ResultadoPagamento.PAGO)
+    assert resultado.status.value == "AGUARDANDO_PAGAMENTO"

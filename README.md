@@ -70,13 +70,13 @@ src/vendas/
 uv sync
 uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run lint-imports
 
-# unidade + integração + BDD; sem TEST_MONGO_URL, o MongoDB é simulado (mongomock)
+# unidade + integração + BDD (cobertura de 100%); sem TEST_MONGO_URL, o MongoDB é simulado (mongomock)
 uv run pytest -m "unit or integration or bdd" --cov=vendas --cov-branch --cov-fail-under=80
 
 # contratos das rotas internas com o principal (contratos/README.md)
 uv run pytest -m contrato
 
-# carga das listagens contra o ambiente no kind (RNF-10: p95 < 300 ms), no PowerShell
+# carga das listagens contra o ambiente no kind (RNF-10: p95 < 300 ms; o CD também roda), no PowerShell
 # powershell -ExecutionPolicy Bypass -File .\scripts\windows\carga-listagens.ps1
 
 # contra um MongoDB real (o CI faz assim, com mongo:7.0)
@@ -118,7 +118,7 @@ Detalhes em [infra/README.md](infra/README.md) e [k8s/README.md](k8s/README.md).
 
 ## 6. Fluxo de contribuição
 
-A `main` é protegida: toda mudança entra por Pull Request, com título em Conventional Commits e os checks do CI verdes (`qualidade`, `testes`, `contrato`, `sonarcloud`, `imagem`, `infra`, `titulo-pr`). O merge dispara o CD, que implanta no kind e roda os testes ponta a ponta pelo Kong (`tests/e2e`): o fluxo da compra paga, o pagamento cancelado, compras recusadas e a **demonstração de falha**, em que o principal é derrubado de propósito (a vitrine continua no ar, a compra é desfeita com 503 e, com o principal de volta, o circuit breaker fecha e a compra segue).
+A `main` é protegida: toda mudança entra por Pull Request, com título em Conventional Commits e os checks do CI verdes (`qualidade`, `testes`, `contrato`, `sonarcloud`, `imagem`, `infra`, `titulo-pr`). O merge dispara o CD, que implanta no kind e roda os testes ponta a ponta pelo Kong (`tests/e2e`): o fluxo da compra paga, o pagamento cancelado, compras recusadas a **demonstração de falha**, em que o principal é derrubado de propósito (a vitrine continua no ar, a compra é desfeita com 503 e, com o principal de volta, o circuit breaker fecha e a compra segue), e a recuperação real pelo CronJob (reserva vencida desfeita e CPF apagado depois da retenção). Por fim, o k6 mede as listagens pelo Kong (p95 abaixo de 300 ms, RNF-10) e reprova o deploy se o limite não for atendido.
 
 ## 7. Documentação
 

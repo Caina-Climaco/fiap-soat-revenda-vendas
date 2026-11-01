@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from typing import assert_never
 from uuid import UUID
 
 from vendas.application.portas import (
@@ -148,6 +149,8 @@ class OrquestradorCompra:
                 return None if compra.concluido(Passo.VENDA_CATALOGO) else self._t6_vender
             case StatusCompra.CANCELADA:
                 return self._compensar if compra.saga.compensacoes_pendentes else None
+            case _:  # pragma: no cover - o mypy garante que todos os status foram tratados
+                assert_never(compra.status)
 
     # ------------------------------------------------------------ passos antes do pivô
 
@@ -317,6 +320,8 @@ class OrquestradorCompra:
                 self._catalogo.desbloquear(compra.veiculo_id, compra.id)
             case Compensacao.CANCELAMENTO_COBRANCA:
                 self._pagamentos.cancelar_cobranca(compra.id)
+            case _:  # pragma: no cover - o mypy garante que todas foram tratadas
+                assert_never(compensacao)
 
     def _recusa_na_compensacao(
         self,

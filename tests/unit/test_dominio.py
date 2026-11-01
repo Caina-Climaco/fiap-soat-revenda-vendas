@@ -132,3 +132,17 @@ def test_efetivacao_e_apagar_cpf() -> None:
     compra.apagar_cpf(AS_10H)
     assert compra.cpf_cifrado is None
     assert compra.cpf_mascarado is None
+
+
+def test_passos_e_compensacoes_repetidos_nao_duplicam() -> None:
+    """Retomada da saga: concluir de novo o que já foi concluído não gera evento novo."""
+    compra = nova()
+    compra.concluir_passo(Passo.RESERVA, AS_10H)
+    compra.concluir_passo(Passo.RESERVA, AS_10H)
+    assert compra.saga.concluidos == [Passo.RESERVA]
+    compra.cancelar(MotivoCancelamento.FALHA_PROCESSAMENTO, AS_10H)
+    compra.coletar_eventos()
+    compra.concluir_compensacao(Compensacao.LIBERACAO, AS_10H)
+    compra.concluir_compensacao(Compensacao.LIBERACAO, AS_10H)  # já não está pendente
+    assert compra.saga.compensacoes_feitas == [Compensacao.LIBERACAO]
+    assert len(compra.coletar_eventos()) == 1

@@ -164,3 +164,28 @@ def test_middleware_usa_template_da_rota_e_conta_500() -> None:
     histograma = ("revenda_http_requisicao_duracao_segundos_count", rotulos)
     assert amostras[histograma] == 2
     assert "abc-123" not in exposicao.text  # ids concretos nunca viram rótulo
+
+
+@pytest.mark.parametrize(
+    ("loc", "campo"),
+    [(("body", "cpf"), "cpf"), (("dados", "versao"), "dados.versao"), ((), "corpo")],
+)
+def test_campo_do_erro_de_validacao(loc: tuple[str, ...], campo: str) -> None:
+    erro = {"type": "missing", "loc": loc, "msg": "Field required"}
+    assert erros_validacao([erro])[0]["campo"] == campo
+
+
+def test_rede_de_seguranca_para_erro_fora_do_middleware() -> None:
+    """Sem o CorrelacaoMiddleware, o tratador global ainda devolve 500 em problem+json."""
+    app = FastAPI()
+    registrar_tratadores_globais(app)
+
+    @app.get("/quebra")
+    def quebra() -> None:
+        raise RuntimeError("falha interna com detalhe que nao pode vazar")
+
+    with TestClient(app, raise_server_exceptions=False) as cliente:
+        resposta = cliente.get("/quebra")
+    assert resposta.status_code == 500
+    assert resposta.headers["content-type"].startswith("application/problem+json")
+    assert "detalhe que nao pode vazar" not in resposta.text

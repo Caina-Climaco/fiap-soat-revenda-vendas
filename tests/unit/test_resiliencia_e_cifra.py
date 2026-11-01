@@ -186,3 +186,18 @@ def test_cifra_aes_gcm_com_dado_associado_e_rotacao() -> None:
     with pytest.raises(ChaveDesconhecidaError):
         CifradorAesGcm({"k1": k1}, "k9")
     assert len(base64.b64decode(cifrado[3:])) == 12 + 11 + 16
+
+
+def test_falha_com_o_circuito_ja_aberto_nao_notifica_de_novo() -> None:
+    relogio = Relogio()
+    mudancas: list[EstadoCircuito] = []
+    circuito = CircuitBreaker(
+        "principal",
+        limite_falhas=1,
+        tempo_aberto_segundos=10,
+        monotonic=relogio,
+        ao_mudar=lambda _n, e: mudancas.append(e),
+    )
+    circuito.registrar_falha()
+    circuito.registrar_falha()  # outra chamada que já estava em curso falhou depois
+    assert mudancas == [EstadoCircuito.ABERTO]
