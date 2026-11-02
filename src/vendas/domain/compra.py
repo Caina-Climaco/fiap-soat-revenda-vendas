@@ -250,6 +250,17 @@ class Compra:
         self.saga.ultimo_erro = erro[:300]
         self.atualizada_em = agora
 
+    def adiar_compensacoes(self, motivo: str, agora: datetime) -> None:
+        """Deixa as compensações remotas para a recuperação, sem contar como tentativa.
+
+        Usado quando o participante acabou de esgotar as tentativas num passo antes do pivô:
+        nenhuma compensação remota foi tentada ainda, então `tentativas` continua zerado e
+        `ultimo_erro` diz o que aconteceu, e não uma falha de compensação que não houve.
+        """
+        self.saga.proxima_tentativa = agora + timedelta(seconds=2)
+        self.saga.ultimo_erro = f"compensações adiadas: {motivo}"[:300]
+        self.atualizada_em = agora
+
     def apagar_cpf(self, agora: datetime) -> None:
         """Retenção (ADR-005): compra cancelada não guarda o CPF além do prazo."""
         self.cpf_cifrado = None

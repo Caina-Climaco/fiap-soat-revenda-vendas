@@ -113,7 +113,7 @@ def test_provedor_replica_e_resultado(api: Api, principal: PrincipalFalso) -> No
 
 
 def test_cobranca_repetida_com_outro_valor_segue_o_contrato(principal: PrincipalFalso) -> None:
-    """Item 4.3 da revisão: o principal recusa T3 repetido com outro valor (409)."""
+    """Contrato T3 (ADR-002): o principal recusa T3 repetido com outro valor (409)."""
     compra = str(uuid.uuid4())
 
     def gerar(valor: str) -> httpx.Response:

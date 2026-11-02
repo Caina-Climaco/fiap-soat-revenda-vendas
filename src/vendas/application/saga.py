@@ -118,7 +118,7 @@ class OrquestradorCompra:
             acao = self._proxima_acao(compra, agora)
             if acao is None:
                 break
-            retentativas = compra.saga.tentativas
+            agendada_antes = compra.saga.proxima_tentativa
             try:
                 acao(compra, agora)
             except ConflitoRevisaoError:
@@ -128,10 +128,12 @@ class OrquestradorCompra:
                     break
                 compra = relida
                 continue
-            if compra.saga.tentativas > retentativas:
-                # Falha transitória agendou nova tentativa: a saga espera o backoff (a
-                # recuperação retoma). Sem isso, como as chamadas lentas consomem o tempo
-                # do backoff, a mesma requisição repetiria a compensação remota.
+            agendada = compra.saga.proxima_tentativa
+            if agendada is not None and agendada != agendada_antes:
+                # A ação agendou uma nova tentativa (falha transitória ou compensações
+                # adiadas): a saga espera (a recuperação retoma). Sem isso, como as chamadas
+                # lentas consomem o tempo do backoff, a mesma requisição repetiria a
+                # compensação remota.
                 break
         return compra
 
@@ -237,9 +239,9 @@ class OrquestradorCompra:
             # é local) e as compensações remotas ficam com a recuperação, em vez de o
             # comprador esperar outra rodada de tentativas contra o mesmo principal (o passo
             # que falhou é T2 ou T3, então ao menos o C2 sempre fica pendente).
-            self._anuncios.liberar(compra.veiculo_id, compra.id, agora)
+            self._executar_compensacao(Compensacao.LIBERACAO, compra, agora)
             compra.concluir_compensacao(Compensacao.LIBERACAO, agora)
-            compra.agendar_retentativa(falha.detalhe, agora)
+            compra.adiar_compensacoes(f"{passo.value}: {falha.detalhe}", agora)
             self._salvar(compra)
 
     # ------------------------------------------------------------ espera do pagamento

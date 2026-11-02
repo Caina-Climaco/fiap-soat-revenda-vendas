@@ -179,7 +179,7 @@ def test_sagas_paradas_contadas_pela_recuperacao_e_expostas_no_metrics(
     relogio: RelogioFixo,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Item 5.2 da revisão: saga com trabalho pendente e sem progresso há mais de 5 min."""
+    """ADR-006: saga com trabalho pendente e sem progresso além de SEM_PROGRESSO_ALERTA."""
     em_dia = api.compra_ok(api.replicar())  # aguardando pagamento, dentro do prazo
     parada = api.compra_ok(api.replicar())
     banco.db.compras.update_one(
