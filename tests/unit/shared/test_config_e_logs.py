@@ -126,6 +126,38 @@ def test_formatador_json_mascara_cpf_em_qualquer_parte_da_linha() -> None:
     assert saida["compra_id"] == "3fa85f64-5717-4562-b3fc-2c963f66afa6"
 
 
+def test_formatador_json_continua_valido_com_inteiro_de_11_digitos() -> None:
+    """O filtro roda antes da serialização: o número mascarado vira string, e a linha é JSON."""
+    registro = logging.LogRecord("x", logging.INFO, __file__, 1, "preco alto", (), None)
+    registro.campos = {
+        "preco_centavos": 12345678901,
+        "ids": [52998224725, 7],
+        "detalhe": {"telefone": "15998765432", "ativo": True, "nota": 9.5, "vazio": None},
+        "tupla": (1, "529.982.247-25"),
+        "objeto": _Repr("cpf 52998224725"),
+    }
+    linha = FormatadorJson().format(registro)
+    saida = json.loads(linha)
+    assert saida["preco_centavos"] == CPF_MASCARADO
+    assert saida["ids"] == [CPF_MASCARADO, 7]
+    assert saida["detalhe"] == {
+        "telefone": CPF_MASCARADO,
+        "ativo": True,
+        "nota": 9.5,
+        "vazio": None,
+    }
+    assert saida["tupla"] == [1, CPF_MASCARADO]
+    assert saida["objeto"] == f"cpf {CPF_MASCARADO}"
+
+
+class _Repr:
+    def __init__(self, texto: str) -> None:
+        self.texto = texto
+
+    def __str__(self) -> str:
+        return self.texto
+
+
 @pytest.mark.parametrize(
     "texto",
     [

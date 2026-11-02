@@ -3,9 +3,11 @@
 Política: nunca registrar o X-Service-Token nem dados pessoais (o CPF nunca vai para o log).
 Quando há um trace ativo, cada linha leva `trace_id` e `span_id` (ADR-007).
 
-Segunda barreira (ADR-005 do serviço de venda): toda linha passa por um filtro que mascara
-qualquer sequência com cara de CPF (11 dígitos, com ou sem pontuação), venha de onde vier
-(mensagem, campo extra ou traceback de exceção).
+Segunda barreira (ADR-005 do serviço de venda): todo valor da linha passa por um filtro que
+mascara qualquer sequência com cara de CPF (11 dígitos, com ou sem pontuação), venha de onde
+vier (mensagem, campo extra ou traceback de exceção). O filtro roda sobre os valores, antes da
+serialização, para que a linha continue sendo JSON válido: um inteiro de 11 dígitos vira a
+string mascarada, nunca um trecho sem aspas.
 """
 
 from __future__ import annotations
@@ -41,6 +43,21 @@ def mascarar_cpf(texto: str) -> str:
     return _PADRAO_CPF.sub(CPF_MASCARADO, texto)
 
 
+def _mascarar_valor(valor: Any) -> Any:
+    """Aplica o filtro a cada valor da linha, recursivamente, preservando os tipos do JSON."""
+    if isinstance(valor, str):
+        return mascarar_cpf(valor)
+    if isinstance(valor, bool) or valor is None or isinstance(valor, float):
+        return valor
+    if isinstance(valor, int):
+        return CPF_MASCARADO if _PADRAO_CPF.fullmatch(str(valor)) else valor
+    if isinstance(valor, dict):
+        return {str(chave): _mascarar_valor(item) for chave, item in valor.items()}
+    if isinstance(valor, (list, tuple, set, frozenset)):
+        return [_mascarar_valor(item) for item in valor]
+    return mascarar_cpf(str(valor))
+
+
 class FormatadorJson(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         registro: dict[str, Any] = {
@@ -61,7 +78,7 @@ class FormatadorJson(logging.Formatter):
                 registro.setdefault(chave, valor)
         if record.exc_info:
             registro["excecao"] = self.formatException(record.exc_info)
-        return mascarar_cpf(json.dumps(registro, ensure_ascii=False, default=str))
+        return json.dumps(_mascarar_valor(registro), ensure_ascii=False)
 
 
 def configurar_logs(nivel: str = "INFO") -> None:
