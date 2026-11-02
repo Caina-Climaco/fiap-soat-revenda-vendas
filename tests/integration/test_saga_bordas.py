@@ -164,3 +164,19 @@ def test_resultado_disputado_com_outro_repasse(
     codigo = principal.cobrancas[compra["id"]].codigo
     resultado = caso_uso.executar(uuid.UUID(compra["id"]), codigo, ResultadoPagamento.PAGO)
     assert resultado.status.value == "AGUARDANDO_PAGAMENTO"
+
+
+def test_falha_antes_do_pivo_adia_compensacoes_sem_contar_tentativa(
+    api: Api, principal: PrincipalFalso, banco: BancoMongo
+) -> None:
+    """Nenhuma compensação remota foi tentada: tentativas fica zerado e o erro diz o porquê."""
+    veiculo = api.replicar()
+    principal.falhas["cobrancas"] = [503, 503, 503]  # T3 esgota as tentativas
+    assert api.comprar(veiculo).status_code == 503
+    documento = banco.db.compras.find_one({"veiculo_id": veiculo})
+    assert documento is not None
+    saga = documento["saga"]
+    assert saga["tentativas"] == 0
+    assert saga["ultimo_erro"].startswith("compensações adiadas: T3")
+    assert saga["proxima_tentativa"] is not None
+    assert "LIBERACAO" in str(saga["compensacoes_feitas"])

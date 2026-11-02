@@ -128,7 +128,7 @@ class MongoAnuncioRepository:
         if self._colecao.update_one(filtro, {"$set": descricao}).matched_count:
             return True
         try:
-            self._colecao.insert_one(_anuncio_para_doc(Anuncio.novo(dados, agora)))
+            self._colecao.insert_one(anuncio_para_documento(Anuncio.novo(dados, agora)))
         except DuplicateKeyError:
             # Outra entrega inseriu o anúncio entre o update e o insert (ex.: v1 e v2 em
             # corrida). Se a dela for mais antiga, esta ainda precisa ser aplicada.
@@ -218,7 +218,8 @@ class MongoAnuncioRepository:
         return [_anuncio_de_doc(d) for d in documentos], total
 
 
-def _anuncio_para_doc(anuncio: Anuncio) -> Documento:
+def anuncio_para_documento(anuncio: Anuncio) -> Documento:
+    """Formato do anúncio na coleção (público para os testes que preparam o banco)."""
     return {
         "_id": str(anuncio.veiculo_id),
         "versao": anuncio.versao,

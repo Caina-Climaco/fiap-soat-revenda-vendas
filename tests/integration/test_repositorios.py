@@ -22,7 +22,7 @@ from vendas.domain.repositorio import ResultadoReserva
 from vendas.infrastructure.repositorio_mongo import (
     MongoAnuncioRepository,
     MongoCompraRepository,
-    _anuncio_para_doc,
+    anuncio_para_documento,
     centavos,
     garantir_indices,
     reais,
@@ -68,7 +68,7 @@ def test_conversoes_de_dinheiro_e_datas() -> None:
 
 
 def test_lease_nao_e_reentrante_nem_dentro_do_mesmo_processo(api: Api, banco: BancoMongo) -> None:
-    """Item 3.2 da revisão: o mesmo dono não toma de novo um lease que está ativo."""
+    """Lease (ADR-002): o mesmo dono não toma de novo um lease que está ativo."""
     compra = uuid.UUID(api.compra_ok(api.replicar())["id"])
     repo = MongoCompraRepository(banco.db)
     lease = timedelta(seconds=30)
@@ -107,7 +107,7 @@ def test_duas_threads_do_mesmo_processo_disputam_o_lease(api: Api, banco: BancoM
 def test_replica_mais_nova_em_corrida_com_a_insercao_da_mais_antiga(
     banco: BancoMongo, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Item 3.3 da revisão: v2 perde o insert para v1 e ainda assim é aplicada."""
+    """Réplica (ADR-003): v2 perde o insert para v1 e ainda assim é aplicada."""
     repo = MongoAnuncioRepository(banco.db)
     veiculo = uuid.uuid4()
 
@@ -128,7 +128,7 @@ def test_replica_mais_nova_em_corrida_com_a_insercao_da_mais_antiga(
 
     def v1_chega_antes(documento: dict[str, Any], *args: Any, **kwargs: Any) -> Any:
         monkeypatch.setattr(colecao, "insert_one", inserir_original)
-        inserir_original(_anuncio_para_doc(Anuncio.novo(dados(1, "70000.00"), AS_10H)))
+        inserir_original(anuncio_para_documento(Anuncio.novo(dados(1, "70000.00"), AS_10H)))
         raise DuplicateKeyError("E11000 duplicate key error")
 
     monkeypatch.setattr(colecao, "insert_one", v1_chega_antes)
@@ -143,7 +143,8 @@ def test_replica_mais_nova_em_corrida_com_a_insercao_da_mais_antiga(
 def test_indices_das_listagens_cobrem_o_sort_e_substituem_os_antigos(
     cliente_mongo: MongoClient[dict[str, Any]],
 ) -> None:
-    """Itens 3.4 e 3.5 da revisão, num banco que ainda tem os índices da versão anterior."""
+    """Índices das listagens e da retenção (ADR-003 e ADR-005), num banco que ainda tem os
+    índices da versão anterior."""
     cliente_mongo.drop_database("revenda_vendas_indices")
     db = cliente_mongo["revenda_vendas_indices"]
     db.anuncios.create_index(

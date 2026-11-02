@@ -160,12 +160,14 @@ class ClienteResiliente:
         except Exception:
             # Erro inesperado (ex.: httpx.InvalidURL): conta como falha; senão a chamada de
             # teste do meio-aberto nunca termina e o circuito fica preso recusando tudo.
-            self.circuito.registrar_falha()
-            self._contar("falha")
+            self._falhou()
             raise
+        self._falhou()
+        raise ParticipanteIndisponivelError(self.destino, ultimo_erro)
+
+    def _falhou(self) -> None:
         self.circuito.registrar_falha()
         self._contar("falha")
-        raise ParticipanteIndisponivelError(self.destino, ultimo_erro)
 
     def fechar(self) -> None:
         self._http.close()

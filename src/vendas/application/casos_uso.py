@@ -203,7 +203,7 @@ class RegistrarResultadoPagamento:
 class ResultadoRecuperacao:
     sagas_processadas: int
     cpfs_apagados: int
-    sagas_paradas: int = 0
+    sagas_paradas: int
 
 
 # A recuperação roda a cada minuto e o backoff das retentativas vai até 5 minutos: uma saga
@@ -247,7 +247,7 @@ class RecuperarSagas:
         return ResultadoRecuperacao(processadas, apagados, self.sagas_paradas())
 
     def sagas_paradas(self) -> int:
-        """Sagas com algo a fazer e sem nenhum progresso há mais de 5 minutos (alerta)."""
+        """Sagas com algo a fazer e sem nenhum progresso há mais de SEM_PROGRESSO_ALERTA."""
         return self._compras.contar_paradas(self._relogio.agora() - SEM_PROGRESSO_ALERTA)
 
 

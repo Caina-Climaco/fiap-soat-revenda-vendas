@@ -94,7 +94,7 @@ def test_principal_lento_e_fora_do_ar_compensacao_remota_fica_para_a_recuperacao
     """Cada chamada ao principal leva 2 s (timeout). Com o T2 esgotado por indisponibilidade,
     a requisição devolve o anúncio à vitrine (C1 local) e responde; o C2 não é tentado na
     mesma requisição contra o principal que acabou de falhar (antes: cerca de 12 s de
-    resposta). A recuperação faz o C2 quando o principal volta (item 5.3 da revisão)."""
+    resposta). A recuperação faz o C2 quando o principal volta (ADR-002)."""
     veiculo = api.replicar()
     principal.fora_do_ar = True
     principal.ao_chamar = lambda: relogio.avancar(timedelta(seconds=2))

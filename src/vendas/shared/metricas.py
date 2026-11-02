@@ -113,8 +113,8 @@ class Metricas:
         )
         self.sagas_paradas = Gauge(
             "revenda_sagas_paradas",
-            "Compras com passo ou compensação pendente sem progresso há mais de 5 minutos "
-            "(calculado pela recuperação de sagas a cada coleta).",
+            "Compras com passo ou compensação pendente sem progresso além do limite de alerta "
+            "da recuperação de sagas (calculado por ela a cada coleta).",
             registry=self.registry,
         )
         self.circuito = Gauge(
