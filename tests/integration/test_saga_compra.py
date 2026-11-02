@@ -88,36 +88,48 @@ def test_principal_fora_do_ar_compensa_e_responde_503(
     assert componentes.recuperar.executar().sagas_processadas == 0  # ainda no backoff
 
 
-def test_principal_lento_e_fora_do_ar_uma_tentativa_de_compensacao_por_requisicao(
-    api: Api, principal: PrincipalFalso, relogio: RelogioFixo
+def test_principal_lento_e_fora_do_ar_compensacao_remota_fica_para_a_recuperacao(
+    api: Api, principal: PrincipalFalso, componentes: Componentes, relogio: RelogioFixo
 ) -> None:
-    """Cada chamada ao principal leva 2 s (timeout). Falhou a compensação remota, a saga
-    espera a próxima tentativa agendada: não repete o C2 na mesma requisição, que ficaria
-    lenta para o comprador (o caso visto no cluster: 3 C2 seguidos, 24 s de resposta)."""
+    """Cada chamada ao principal leva 2 s (timeout). Com o T2 esgotado por indisponibilidade,
+    a requisição devolve o anúncio à vitrine (C1 local) e responde; o C2 não é tentado na
+    mesma requisição contra o principal que acabou de falhar (antes: cerca de 12 s de
+    resposta). A recuperação faz o C2 quando o principal volta (item 5.3 da revisão)."""
     veiculo = api.replicar()
     principal.fora_do_ar = True
     principal.ao_chamar = lambda: relogio.avancar(timedelta(seconds=2))
     resposta = api.comprar(veiculo)
     assert resposta.status_code == 503
     assert api.anuncio(veiculo)["status"] == "A_VENDA"  # C1 local na hora
-    tentativas_t2 = 3  # o cliente HTTP repete até 3 vezes
-    tentativas_c2 = 3
-    assert len(principal.caminhos("bloqueio")) == tentativas_t2 + tentativas_c2
+    tentativas_t2 = 3  # o cliente HTTP repete até 3 vezes; nenhum C2 na requisição
+    assert len(principal.caminhos("bloqueio")) == tentativas_t2
+    # A recuperação tenta o C2 com o principal ainda fora: falha e reagenda.
+    relogio.avancar(timedelta(minutes=1))
+    assert componentes.recuperar.executar().sagas_processadas == 1
+    principal.fora_do_ar = False
+    principal.ao_chamar = None
+    relogio.avancar(timedelta(minutes=1))
+    antes = len(principal.caminhos("bloqueio"))
+    assert componentes.recuperar.executar().sagas_processadas == 1
+    assert len(principal.caminhos("bloqueio")) == antes + 1  # o DELETE do bloqueio
+    assert componentes.recuperar.executar().sagas_processadas == 0  # nada pendente
 
 
 def test_compensacao_pendente_concluida_pela_recuperacao(
     api: Api, principal: PrincipalFalso, componentes: Componentes, relogio: RelogioFixo
 ) -> None:
     veiculo = api.replicar()
-    principal.falhas["cobrancas"] = [503, 503, 503, 503, 503, 503]  # T3 e C3 falham
+    principal.falhas["cobrancas"] = [503, 503, 503]  # T3 esgota as tentativas
     resposta = api.comprar(veiculo)
     assert resposta.status_code == 503
-    assert principal.veiculo(veiculo).status == "A_VENDA"  # C2 conseguiu
+    assert api.anuncio(veiculo)["status"] == "A_VENDA"  # C1 local na hora
+    assert principal.veiculo(veiculo).status != "A_VENDA"  # C2 e C3 ficam para depois
     relogio.avancar(timedelta(minutes=1))
     assert componentes.recuperar.executar().sagas_processadas == 1
     compra_id = principal.caminhos("cancelamento")[-1].split("/")[-2]
     assert principal.cobrancas[compra_id].status == "CANCELADA"
     assert compra_id in principal.compensadas
+    assert principal.veiculo(veiculo).status == "A_VENDA"  # C2 feito pela recuperação
 
 
 def test_expiracao_pela_recuperacao(

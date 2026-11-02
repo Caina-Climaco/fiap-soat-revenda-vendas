@@ -111,6 +111,12 @@ class Metricas:
             ("destino", "resultado"),
             registry=self.registry,
         )
+        self.sagas_paradas = Gauge(
+            "revenda_sagas_paradas",
+            "Compras com passo ou compensação pendente sem progresso há mais de 5 minutos "
+            "(calculado pela recuperação de sagas a cada coleta).",
+            registry=self.registry,
+        )
         self.circuito = Gauge(
             "revenda_circuito_estado",
             "Estado do circuit breaker por destino: 0 fechado, 1 meio-aberto, 2 aberto.",

@@ -2,12 +2,17 @@
 
 Política: nunca registrar o X-Service-Token nem dados pessoais (o CPF nunca vai para o log).
 Quando há um trace ativo, cada linha leva `trace_id` e `span_id` (ADR-007).
+
+Segunda barreira (ADR-005 do serviço de venda): toda linha passa por um filtro que mascara
+qualquer sequência com cara de CPF (11 dígitos, com ou sem pontuação), venha de onde vier
+(mensagem, campo extra ou traceback de exceção).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -24,6 +29,16 @@ _ATRIBUTOS_PADRAO = frozenset(vars(logging.makeLogRecord({})).keys()) | {
     "asctime",
     "color_message",
 }
+
+
+# 11 dígitos no formato do CPF, isolados: não pega trechos de números maiores nem de
+# identificadores hexadecimais (trace_id, uuid), que têm letras ou dígitos colados.
+_PADRAO_CPF = re.compile(r"(?<![\w.\-])\d{3}\.?\d{3}\.?\d{3}-?\d{2}(?![\w\-]|\.\d)")
+CPF_MASCARADO = "***.***.***-**"
+
+
+def mascarar_cpf(texto: str) -> str:
+    return _PADRAO_CPF.sub(CPF_MASCARADO, texto)
 
 
 class FormatadorJson(logging.Formatter):
@@ -46,7 +61,7 @@ class FormatadorJson(logging.Formatter):
                 registro.setdefault(chave, valor)
         if record.exc_info:
             registro["excecao"] = self.formatException(record.exc_info)
-        return json.dumps(registro, ensure_ascii=False, default=str)
+        return mascarar_cpf(json.dumps(registro, ensure_ascii=False, default=str))
 
 
 def configurar_logs(nivel: str = "INFO") -> None:

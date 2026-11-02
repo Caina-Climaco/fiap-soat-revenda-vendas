@@ -201,3 +201,32 @@ def test_falha_com_o_circuito_ja_aberto_nao_notifica_de_novo() -> None:
     circuito.registrar_falha()
     circuito.registrar_falha()  # outra chamada que já estava em curso falhou depois
     assert mudancas == [EstadoCircuito.ABERTO]
+
+
+def test_erro_inesperado_no_meio_aberto_nao_prende_o_circuito() -> None:
+    """Exceção fora de TransportError (ex.: InvalidURL) também encerra a chamada de teste."""
+    relogio = Relogio()
+    circuito = CircuitBreaker(
+        "principal", limite_falhas=1, tempo_aberto_segundos=10, monotonic=relogio
+    )
+    respostas: list[Callable[[httpx.Request], httpx.Response]] = []
+
+    def responder(requisicao: httpx.Request) -> httpx.Response:
+        return respostas.pop(0)(requisicao)
+
+    def url_invalida(_r: httpx.Request) -> httpx.Response:
+        raise httpx.InvalidURL("url inválida")
+
+    cliente, _ = _cliente(responder, circuito=circuito, tentativas=1)
+    circuito.registrar_falha()  # abre
+    relogio.agora = 11  # vence o tempo aberto: a próxima chamada é o teste do meio-aberto
+    respostas.append(url_invalida)
+    with pytest.raises(httpx.InvalidURL):
+        cliente.chamar("GET", "/x")
+    assert circuito.estado is EstadoCircuito.ABERTO  # a chamada de teste contou como falha
+    relogio.agora = 22
+    respostas.append(lambda _r: httpx.Response(200))
+    # Antes da correção, `_teste_em_andamento` ficava True e esta chamada respondia
+    # "circuito aberto" para sempre.
+    assert cliente.chamar("GET", "/x").status_code == 200
+    assert circuito.estado is EstadoCircuito.FECHADO

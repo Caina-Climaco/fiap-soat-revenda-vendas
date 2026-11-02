@@ -39,7 +39,9 @@ Orquestrada por este serviço ([ADR-002](docs/adrs/ADR-002-saga-orquestrada.md))
 | T5 | Efetivar a compra e marcar o anúncio como vendido | aqui | |
 | T6 | Marcar o veículo como vendido no catálogo (repetido até concluir) | principal | |
 
-- **Falha antes do pivô** (principal fora, versão alterada, veículo indisponível): a compra é cancelada na hora, o anúncio volta à vitrine e as compensações remotas que falharem ficam pendentes até concluírem.
+**Data da venda**: o comprador informa só o CPF. A data da venda é o instante em que o pagamento é confirmado e a compra efetivada (T5): fica gravada em `data_venda` e é devolvida em `GET /api/v1/compras/{id}` e na listagem de vendidos.
+
+- **Falha antes do pivô**: com versão alterada ou veículo indisponível, a compra é cancelada na hora e desfeita. Com o principal fora (tentativas esgotadas), a compra também é cancelada na hora e o anúncio volta à vitrine (C1 é local), mas as compensações remotas (C2, C3) ficam com a recuperação, para o comprador não esperar outra rodada de tentativas contra o mesmo principal. Consequência visível: entre a resposta e a recuperação (até cerca de 1 minuto, mais se o principal continuar fora), o veículo segue bloqueado no principal enquanto a vitrine já o mostra à venda; um segundo comprador nesse intervalo recebe 409 `veiculo-indisponivel` e pode tentar de novo logo depois.
 - **Na espera do pagamento**: expiração ou cancelamento começam pelo C3, porque a cobrança decide a corrida; se ela já estava paga, a compra segue para a efetivação.
 - **Durabilidade**: o estado da saga fica no documento da compra; um lease garante um único executor; a recuperação (`python -m vendas.recuperacao`, CronJob a cada minuto) expira reservas, retoma sagas paradas e repete o que foi adiado ([ADR-006](docs/adrs/ADR-006-expiracao-e-recuperacao-de-sagas.md)).
 - **Resiliência**: chamadas ao principal com timeout, retry com backoff e jitter (502, 503, 504 e erro de rede) e circuit breaker; com o circuito aberto, a compra falha na hora com 503 e `Retry-After`.
@@ -89,6 +91,8 @@ O principal é substituído nos testes por um falso que implementa as rotas inte
 ## 5. Como executar localmente (cluster kind)
 
 O serviço roda no cluster kind da plataforma comum, criado pelo repositório principal. Pré-requisitos: Windows 11 com Docker Desktop, `kind`, `kubectl` e `terraform`.
+
+> O ambiente completo (kind, Terraform e o runner do CD) foi montado para Windows 11. Em outros sistemas, os testes de unidade, integração, BDD e contrato rodam com `uv` (seção 4; sem MongoDB, o banco é simulado); a evidência do ambiente implantado está no vídeo da entrega.
 
 ```powershell
 # 1. No repositório principal: plataforma (cluster, Kong, observabilidade) e o CD de lá

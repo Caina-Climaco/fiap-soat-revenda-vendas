@@ -276,7 +276,7 @@
   "paths": {
     "/internal/v1/cobrancas": {
       "post": {
-        "description": "Idempotente pela compra_id: a primeira chamada responde 201; repetições respondem 200 com a mesma cobrança. Depois da compensação, 409.",
+        "description": "Idempotente pela compra_id: a primeira chamada responde 201; repetições com o mesmo valor respondem 200 com a mesma cobrança. Repetição com outro valor responde 409 (cobranca-divergente); depois da compensação, 409 (compra-compensada).",
         "operationId": "gerar_internal_v1_cobrancas_post",
         "requestBody": {
           "content": {

@@ -124,12 +124,12 @@ def test_reserva_perdida_entre_a_leitura_e_o_t1(
 
 
 def test_saga_no_backoff_nao_tenta_antes_da_hora(
-    api: Api, principal: PrincipalFalso, componentes: Componentes
+    api: Api, principal: PrincipalFalso, componentes: Componentes, banco: BancoMongo
 ) -> None:
     veiculo = api.replicar()
     principal.fora_do_ar = True
     assert api.comprar(veiculo).status_code == 503  # C2 ficou agendado
-    compra_id = principal.caminhos("bloqueio")[-1].split("/")[-1]  # DELETE do C2
+    compra_id = banco.db.compras.find_one({"veiculo_id": veiculo})["_id"]  # type: ignore[index]
     compra = componentes.orquestrador._compras.obter(uuid.UUID(compra_id))
     assert compra is not None
     chamadas = len(principal.chamadas)

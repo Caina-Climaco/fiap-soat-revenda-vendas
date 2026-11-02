@@ -56,6 +56,21 @@ def test_ids_do_trace_e_contexto_propagado() -> None:
     assert portador["traceparent"].split("-")[1] == ids["trace_id"]
 
 
+@pytest.fixture
+def provedor_global_isolado(monkeypatch: pytest.MonkeyPatch) -> None:
+    """O provedor de traces do OpenTelemetry é global e só pode ser definido uma vez por
+    processo: zerado só durante o teste e restaurado no fim, para não vazar para os outros."""
+    from opentelemetry import trace
+    from opentelemetry.util._once import Once
+
+    # Atributos privados do opentelemetry-api (não há API pública para desfazer o
+    # set_tracer_provider); se uma atualização da biblioteca os renomear, este teste quebra
+    # na hora e aponta aqui.
+    monkeypatch.setattr(trace, "_TRACER_PROVIDER", None)
+    monkeypatch.setattr(trace, "_TRACER_PROVIDER_SET_ONCE", Once())
+
+
+@pytest.mark.usefixtures("provedor_global_isolado")
 def test_tracing_ligado_instrumenta_app_mongo_e_httpx(monkeypatch: pytest.MonkeyPatch) -> None:
     from opentelemetry import trace
     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
@@ -76,3 +91,9 @@ def test_tracing_ligado_instrumenta_app_mongo_e_httpx(monkeypatch: pytest.Monkey
         HTTPXClientInstrumentor().uninstrument()
         PymongoInstrumentor().uninstrument()
         provedor.shutdown()  # type: ignore[union-attr]
+
+
+def test_provedor_global_volta_ao_padrao_depois_do_teste_de_tracing() -> None:
+    from opentelemetry import trace
+
+    assert not isinstance(trace.get_tracer_provider(), TracerProvider)

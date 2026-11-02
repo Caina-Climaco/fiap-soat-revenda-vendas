@@ -110,3 +110,22 @@ def test_provedor_replica_e_resultado(api: Api, principal: PrincipalFalso) -> No
     _conferir_proprio(api.resultado(compra["id"], codigo, "PAGO"))
     _conferir_proprio(api.resultado(compra["id"], "PAG-ffffffffffff", "PAGO"))  # divergente
     _conferir_proprio(api.resultado(str(uuid.uuid4()), codigo, "PAGO"))  # desconhecida
+
+
+def test_cobranca_repetida_com_outro_valor_segue_o_contrato(principal: PrincipalFalso) -> None:
+    """Item 4.3 da revisão: o principal recusa T3 repetido com outro valor (409)."""
+    compra = str(uuid.uuid4())
+
+    def gerar(valor: str) -> httpx.Response:
+        requisicao = httpx.Request(
+            "POST",
+            "http://principal.teste/internal/v1/cobrancas",
+            json={"compra_id": compra, "valor": valor},
+        )
+        return principal(requisicao)
+
+    assert gerar("119900.00").status_code == 201
+    assert gerar("119900.00").status_code == 200
+    divergente = gerar("1.00")
+    assert divergente.status_code == 409
+    assert divergente.json()["type"].endswith("cobranca-divergente")

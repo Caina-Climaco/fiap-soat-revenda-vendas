@@ -164,3 +164,23 @@ def test_cliente_do_principal_sem_metricas(settings: Settings) -> None:
         assert cliente.circuito.estado is EstadoCircuito.ABERTO
     finally:
         cliente.fechar()
+
+
+class _BancoEspiao(BancoMongo):
+    fechado = False
+
+    def fechar(self) -> None:
+        self.fechado = True
+        super().fechar()
+
+
+def test_app_fecha_o_cliente_mongo_que_abriu(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TOKEN_SERVICO_ENTRADA", TOKEN_ENTRADA)
+    monkeypatch.setenv("TOKEN_SERVICO_SAIDA", TOKEN_SAIDA)
+    monkeypatch.setenv("CPF_CHAVE", CHAVE_CPF)
+    espiao = _BancoEspiao(mongomock.MongoClient(tz_aware=True), "x")
+    monkeypatch.setattr(vendas.main.BancoMongo, "conectar", lambda *_a: espiao)
+    with TestClient(criar_app()) as cliente:
+        assert cliente.get("/health/live").status_code == 200
+        assert not espiao.fechado
+    assert espiao.fechado

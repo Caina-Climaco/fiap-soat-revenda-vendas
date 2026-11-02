@@ -46,7 +46,8 @@ from vendas.shared.mongo import BancoMongo
 
 
 def identificador_do_processo() -> str:
-    """Dono do lease: o nome do pod (hostname) e o pid."""
+    """Prefixo do dono do lease: o nome do pod (hostname) e o pid; cada execução da saga
+    acrescenta um sufixo único (OrquestradorCompra.novo_dono)."""
     return f"{socket.gethostname()}-{os.getpid()}"
 
 

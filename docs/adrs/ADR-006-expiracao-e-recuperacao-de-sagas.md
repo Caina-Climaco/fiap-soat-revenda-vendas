@@ -30,9 +30,9 @@ Na Fase 4, expirar uma compra é executar compensações em outro serviço (canc
 | Passo retentável pendente (T6 com o principal fora) | Repete, com backoff registrado em `proxima_tentativa` |
 | Compra cancelada além do prazo de retenção | Apaga o CPF ([ADR-005](ADR-005-cpf-lgpd.md)) |
 
-- **Lease**: antes de agir numa saga, quem age (requisição ou CronJob) toma posse com um update condicional (`lease_ate < agora` → `lease_ate = agora + 30 s`, `dono = <pod>`). Isso impede que a requisição de compra e o CronJob executem a mesma saga ao mesmo tempo.
+- **Lease**: antes de agir numa saga, quem age (requisição ou CronJob) toma posse com um update condicional: só um lease livre ou vencido pode ser tomado (`lease_ate` nulo ou `< agora` → `lease_ate = agora + 30 s`, `dono = <pod>-<pid>-<sufixo>`). O dono é único por execução, não por processo: duas requisições no mesmo pod nunca dividem um lease, e uma execução que passou do prazo não libera o lease de quem a substituiu (a liberação exige o mesmo dono). Isso impede que a requisição de compra e o CronJob, ou duas requisições, executem a mesma saga ao mesmo tempo. Efeito colateral aceito: se o repasse do pagamento (PAGO) chega nos milissegundos em que a requisição de compra ainda segura o lease, o resultado é gravado, mas o T5 fica para a recuperação (até cerca de 1 minuto).
 - **Expiração imediata no caminho da compra**: se um comprador tenta comprar um anúncio cuja reserva já venceu, a própria requisição expira a compra anterior (com lease) antes de reservar. Isso mantém a vantagem da Fase 3 sem custo nas listagens.
-- O prazo da reserva (padrão 30 min) e o intervalo do CronJob são configuráveis; no e2e e no vídeo o prazo é reduzido para a demonstração.
+- O prazo da reserva (padrão 30 min) e o intervalo do CronJob são configuráveis. O e2e do CD não reduz o prazo: adianta as datas da compra no MongoDB e executa a recuperação de verdade, criando um job a partir do CronJob.
 
 ## Consequências
 
@@ -46,4 +46,4 @@ Na Fase 4, expirar uma compra é executar compensações em outro serviço (canc
 
 ## Mitigações
 - A consulta da compra informa `expira_em`, então o atraso não engana quem consulta.
-- Métrica de sagas paradas e alerta quando alguma fica sem progresso por mais de 5 minutos.
+- Métrica de sagas paradas (`revenda_sagas_paradas`): compras com passo, compensação ou decisão pendente e sem nenhuma mudança há mais de 5 minutos. O cálculo é da recuperação (o CronJob o registra no log de cada execução) e a API o expõe no `/metrics` a cada coleta, porque um CronJob não é coletado pelo Prometheus. O alerta `SagasParadas` dispara quando o valor fica acima de zero por 5 minutos.

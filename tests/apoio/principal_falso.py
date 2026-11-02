@@ -11,6 +11,7 @@ import json
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -125,6 +126,8 @@ class PrincipalFalso:
             if existente is not None:
                 if existente.status == "CANCELADA" and compra in self.compensadas:
                     return _problema(409, "compra-compensada")
+                if Decimal(str(existente.valor)) != Decimal(str(corpo["valor"])):
+                    return _problema(409, "cobranca-divergente")  # como o principal real
                 return httpx.Response(200, json=_cobranca(compra, existente, efeito=False))
             nova = CobrancaFalsa(codigo=f"PAG-{secrets.token_hex(6)}", valor=corpo["valor"])
             self.cobrancas[compra] = nova

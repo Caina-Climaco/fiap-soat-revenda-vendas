@@ -15,7 +15,13 @@ from pydantic import ValidationError
 from vendas.shared.clock import RelogioFixo, RelogioSistema
 from vendas.shared.config import MongoSettings, Settings
 from vendas.shared.eventos import PublicadorEventosLog
-from vendas.shared.logging import FormatadorJson, configurar_logs, request_id_atual
+from vendas.shared.logging import (
+    CPF_MASCARADO,
+    FormatadorJson,
+    configurar_logs,
+    mascarar_cpf,
+    request_id_atual,
+)
 
 VARIAVEIS = (
     "MONGO_URL",
@@ -98,6 +104,40 @@ def test_formatador_json_registra_excecao() -> None:
         registro = logging.LogRecord("x", logging.ERROR, __file__, 1, "erro", (), sys.exc_info())
     saida = json.loads(FormatadorJson().format(registro))
     assert "RuntimeError: falhou" in saida["excecao"]
+
+
+def test_formatador_json_mascara_cpf_em_qualquer_parte_da_linha() -> None:
+    """Segunda barreira do ADR-005: CPF que escapar por engano não chega ao log."""
+    try:
+        raise ValueError("CPF 52998224725 recusado")
+    except ValueError:
+        excecao = sys.exc_info()
+    registro = logging.LogRecord(
+        "x", logging.ERROR, __file__, 1, "compra de %s", ("529.982.247-25",), excecao
+    )
+    registro.campos = {"cpf": "529982247-25", "compra_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6"}
+    linha = FormatadorJson().format(registro)
+    assert "52998224725" not in linha
+    assert "982.247" not in linha
+    saida = json.loads(linha)
+    assert saida["mensagem"] == f"compra de {CPF_MASCARADO}"
+    assert saida["cpf"] == CPF_MASCARADO
+    assert CPF_MASCARADO in saida["excecao"]
+    assert saida["compra_id"] == "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        "trace 4bf92f3577b34da6a3ce929d0e0e4736",
+        "2026-11-01T22:49:20.123+00:00",
+        "valor 123456789012",
+        "preco 52998224725.50",
+        "versao 1.52998224725",
+    ],
+)
+def test_mascara_nao_altera_o_que_nao_e_cpf(texto: str) -> None:
+    assert mascarar_cpf(texto) == texto
 
 
 def test_configurar_logs_e_publicador_de_eventos() -> None:
