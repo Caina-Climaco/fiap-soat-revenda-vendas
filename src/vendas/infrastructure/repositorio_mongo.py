@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from contextlib import suppress
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -17,7 +18,7 @@ from uuid import UUID
 from pymongo import ASCENDING, ReturnDocument
 from pymongo.collection import Collection
 from pymongo.database import Database
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, OperationFailure
 
 from vendas.domain.anuncio import Anuncio, DadosAnuncio, StatusAnuncio
 from vendas.domain.compra import (
@@ -53,15 +54,40 @@ def _data(valor: Any) -> datetime:
     return data
 
 
+# Índices substituídos: mudar as chaves mantendo o nome faria o create_index falhar num
+# banco já implantado; os novos têm outro nome e os antigos são removidos.
+_INDICES_SUBSTITUIDOS = {"anuncios": ("ix_vitrine_a_venda", "ix_vitrine_vendidos")}
+
+
 def garantir_indices(db: Database[Documento]) -> None:
     """Idempotente: roda na subida da aplicação e do CronJob."""
+    for colecao, nomes in _INDICES_SUBSTITUIDOS.items():
+        existentes = db[colecao].index_information()
+        for nome in nomes:
+            # Outra réplica (ou o CronJob) pode remover entre a leitura e o drop: na subida
+            # da versão nova, várias rodam esta função ao mesmo tempo.
+            if nome in existentes:
+                with suppress(OperationFailure):
+                    db[colecao].drop_index(nome)
+    # As listagens ordenam por preço, data e `_id` (desempate estável na paginação): com o
+    # `_id` como última chave, o índice atende o sort inteiro, sem ordenação em memória.
     db.anuncios.create_index(
-        [("status", ASCENDING), ("preco_centavos", ASCENDING), ("criado_em", ASCENDING)],
-        name="ix_vitrine_a_venda",
+        [
+            ("status", ASCENDING),
+            ("preco_centavos", ASCENDING),
+            ("criado_em", ASCENDING),
+            ("_id", ASCENDING),
+        ],
+        name="ix_vitrine_a_venda_ordem",
     )
     db.anuncios.create_index(
-        [("status", ASCENDING), ("preco_venda_centavos", ASCENDING), ("data_venda", ASCENDING)],
-        name="ix_vitrine_vendidos",
+        [
+            ("status", ASCENDING),
+            ("preco_venda_centavos", ASCENDING),
+            ("data_venda", ASCENDING),
+            ("_id", ASCENDING),
+        ],
+        name="ix_vitrine_vendidos_ordem",
     )
     # RN-03: no máximo uma compra ativa por veículo, garantido pelo banco.
     db.compras.create_index(
@@ -72,6 +98,12 @@ def garantir_indices(db: Database[Documento]) -> None:
     )
     db.compras.create_index(
         [("status", ASCENDING), ("saga.proxima_tentativa", ASCENDING)], name="ix_recuperacao"
+    )
+    # Retenção do CPF (canceladas_com_cpf_ate): só as canceladas entram no índice.
+    db.compras.create_index(
+        [("status", ASCENDING), ("atualizada_em", ASCENDING)],
+        name="ix_retencao_cpf",
+        partialFilterExpression={"status": StatusCompra.CANCELADA.value},
     )
 
 
@@ -92,15 +124,15 @@ class MongoAnuncioRepository:
             "preco_centavos": centavos(dados.preco),
             "atualizado_em": agora,
         }
-        atualizado = self._colecao.update_one(
-            {"_id": str(dados.veiculo_id), "versao": {"$lt": dados.versao}}, {"$set": descricao}
-        )
-        if atualizado.matched_count:
+        filtro = {"_id": str(dados.veiculo_id), "versao": {"$lt": dados.versao}}
+        if self._colecao.update_one(filtro, {"$set": descricao}).matched_count:
             return True
         try:
             self._colecao.insert_one(_anuncio_para_doc(Anuncio.novo(dados, agora)))
         except DuplicateKeyError:
-            return False  # já existe com versão igual ou mais nova
+            # Outra entrega inseriu o anúncio entre o update e o insert (ex.: v1 e v2 em
+            # corrida). Se a dela for mais antiga, esta ainda precisa ser aplicada.
+            return bool(self._colecao.update_one(filtro, {"$set": descricao}).matched_count)
         return True
 
     def obter(self, veiculo_id: UUID) -> Anuncio | None:
@@ -278,11 +310,9 @@ class MongoCompraRepository:
         documento = self._colecao.find_one_and_update(
             {
                 "_id": str(compra_id),
-                "$or": [
-                    {"saga.lease_ate": None},
-                    {"saga.lease_ate": {"$lt": agora}},
-                    {"saga.dono_lease": dono},
-                ],
+                # Sem reentrância: o dono é único por execução (OrquestradorCompra.novo_dono),
+                # então só um lease livre ou vencido pode ser tomado.
+                "$or": [{"saga.lease_ate": None}, {"saga.lease_ate": {"$lt": agora}}],
             },
             {
                 "$set": {"saga.lease_ate": agora + duracao, "saga.dono_lease": dono},
@@ -306,32 +336,25 @@ class MongoCompraRepository:
         no_prazo = {
             "$or": [{"saga.proxima_tentativa": None}, {"saga.proxima_tentativa": {"$lte": agora}}]
         }
-        algo_a_fazer = {
-            "$or": [
-                {"status": StatusCompra.PROCESSANDO.value},
-                {
-                    "status": StatusCompra.AGUARDANDO_PAGAMENTO.value,
-                    "$or": [
-                        {"expira_em": {"$lte": agora}},
-                        {"resultado_pagamento": {"$ne": None}},
-                    ],
-                },
-                {
-                    "status": StatusCompra.EFETIVADA.value,
-                    "saga.concluidos": {"$ne": Passo.VENDA_CATALOGO.value},
-                },
-                {
-                    "status": StatusCompra.CANCELADA.value,
-                    "saga.compensacoes_pendentes.0": {"$exists": True},
-                },
-            ]
-        }
         documentos = (
-            self._colecao.find({"$and": [algo_a_fazer, livre, no_prazo]}, {"_id": 1})
+            self._colecao.find({"$and": [_algo_a_fazer(agora), livre, no_prazo]}, {"_id": 1})
             .sort("criada_em", ASCENDING)
             .limit(limite)
         )
         return [UUID(d["_id"]) for d in documentos]
+
+    def contar_paradas(self, sem_progresso_desde: datetime) -> int:
+        # `_algo_a_fazer(sem_progresso_desde)`, não do instante atual: a compra que acabou de
+        # expirar tem `atualizada_em` antigo (de quando entrou na espera do pagamento), mas só
+        # agora passou a ter algo a fazer; ela não está parada, a recuperação ainda nem passou.
+        return self._colecao.count_documents(
+            {
+                "$and": [
+                    _algo_a_fazer(sem_progresso_desde),
+                    {"atualizada_em": {"$lt": sem_progresso_desde}},
+                ]
+            }
+        )
 
     def canceladas_com_cpf_ate(self, limite_data: datetime, limite: int) -> list[UUID]:
         documentos = self._colecao.find(
@@ -343,6 +366,30 @@ class MongoCompraRepository:
             {"_id": 1},
         ).limit(limite)
         return [UUID(d["_id"]) for d in documentos]
+
+
+def _algo_a_fazer(agora: datetime) -> Documento:
+    """Compras cuja saga ainda tem passo, compensação ou decisão a tomar (ADR-006)."""
+    return {
+        "$or": [
+            {"status": StatusCompra.PROCESSANDO.value},
+            {
+                "status": StatusCompra.AGUARDANDO_PAGAMENTO.value,
+                "$or": [
+                    {"expira_em": {"$lte": agora}},
+                    {"resultado_pagamento": {"$ne": None}},
+                ],
+            },
+            {
+                "status": StatusCompra.EFETIVADA.value,
+                "saga.concluidos": {"$ne": Passo.VENDA_CATALOGO.value},
+            },
+            {
+                "status": StatusCompra.CANCELADA.value,
+                "saga.compensacoes_pendentes.0": {"$exists": True},
+            },
+        ]
+    }
 
 
 def _compra_para_doc(compra: Compra) -> Documento:

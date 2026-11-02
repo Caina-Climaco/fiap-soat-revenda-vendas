@@ -111,8 +111,9 @@ class IniciarCompra:
         # Gravada já com T1 iniciado e com o lease desta requisição: se o processo cair
         # aqui, a recuperação sabe que precisa liberar o anúncio.
         compra.iniciar_passo(Passo.RESERVA, agora)
+        dono = self._orquestrador.novo_dono()
         compra.saga.lease_ate = agora + self._orquestrador.duracao_lease
-        compra.saga.dono_lease = self._orquestrador.dono
+        compra.saga.dono_lease = dono
         try:
             self._compras.inserir(compra)
         except CompraAtivaExistenteError as exc:
@@ -121,7 +122,7 @@ class IniciarCompra:
         try:
             compra = self._orquestrador.avancar(compra)
         finally:
-            self._compras.liberar_lease(compra.id, self._orquestrador.dono)
+            self._compras.liberar_lease(compra.id, dono)
         self._traduzir_cancelamento(compra)
         return compra
 
@@ -202,6 +203,12 @@ class RegistrarResultadoPagamento:
 class ResultadoRecuperacao:
     sagas_processadas: int
     cpfs_apagados: int
+    sagas_paradas: int = 0
+
+
+# A recuperação roda a cada minuto e o backoff das retentativas vai até 5 minutos: uma saga
+# com trabalho pendente que não muda há mais que isso não está sendo executada.
+SEM_PROGRESSO_ALERTA = timedelta(minutes=5)
 
 
 class RecuperarSagas:
@@ -237,7 +244,11 @@ class RecuperarSagas:
             except ConflitoRevisaoError:  # pragma: no cover - fica para a próxima execução
                 continue
             apagados += 1
-        return ResultadoRecuperacao(processadas, apagados)
+        return ResultadoRecuperacao(processadas, apagados, self.sagas_paradas())
+
+    def sagas_paradas(self) -> int:
+        """Sagas com algo a fazer e sem nenhum progresso há mais de 5 minutos (alerta)."""
+        return self._compras.contar_paradas(self._relogio.agora() - SEM_PROGRESSO_ALERTA)
 
 
 @dataclass(frozen=True, slots=True)

@@ -27,22 +27,26 @@ _logger = logging.getLogger("vendas.recuperacao")
 def main(_argv: Sequence[str] | None = None, *, banco: BancoMongo | None = None) -> int:
     settings = Settings()
     configurar_logs(settings.log_level)
+    banco_proprio = banco is None
     banco = banco or BancoMongo.conectar(
         settings.mongo_url.get_secret_value(), settings.mongo_banco
     )
-    garantir_indices(banco.db)
     cliente = criar_cliente_principal(settings, None)
     try:
+        garantir_indices(banco.db)
         componentes = montar(settings, banco, cliente, RelogioSistema(), PublicadorEventosLog())
         resultado = componentes.recuperar.executar()
     finally:
         cliente.fechar()
+        if banco_proprio:
+            banco.fechar()
     _logger.info(
         "recuperação concluída",
         extra={
             "campos": {
                 "sagas_processadas": resultado.sagas_processadas,
                 "cpfs_apagados": resultado.cpfs_apagados,
+                "sagas_paradas": resultado.sagas_paradas,
             }
         },
     )

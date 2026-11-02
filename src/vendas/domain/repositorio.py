@@ -94,6 +94,10 @@ class CompraRepository(Protocol):
         """Compras cuja saga tem algo a fazer agora (ADR-006 do serviço de venda)."""
         ...
 
+    def contar_paradas(self, sem_progresso_desde: datetime) -> int:
+        """Compras que já tinham algo a fazer em `sem_progresso_desde` e não mudaram desde então."""
+        ...
+
     def canceladas_com_cpf_ate(self, limite_data: datetime, limite: int) -> list[UUID]:
         """Compras canceladas antes de `limite_data` que ainda guardam o CPF."""
         ...

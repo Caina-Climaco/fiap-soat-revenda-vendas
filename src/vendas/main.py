@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
@@ -115,6 +116,8 @@ def criar_app(
     settings = settings or Settings()  # valores vêm do ambiente
     configurar_logs(settings.log_level)
 
+    # Só fecha no fim da aplicação o cliente que ela mesma abriu (os testes injetam o deles).
+    banco_proprio = banco is None
     banco = banco or BancoMongo.conectar(
         settings.mongo_url.get_secret_value(), settings.mongo_banco
     )
@@ -136,6 +139,14 @@ def criar_app(
         ),
     )
 
+    def contar_sagas_paradas() -> float:
+        try:
+            return float(componentes.recuperar.sagas_paradas())
+        except Exception:  # banco fora: a série some (NaN) em vez de derrubar o /metrics
+            return math.nan
+
+    metricas.sagas_paradas.set_function(contar_sagas_paradas)
+
     def casos_uso() -> CasosUsoVendas:
         return componentes.casos_uso
 
@@ -145,6 +156,8 @@ def criar_app(
             yield
         finally:
             cliente_principal.fechar()
+            if banco_proprio:
+                banco.fechar()
 
     app = FastAPI(
         title="Revenda de Veículos: serviço de venda",

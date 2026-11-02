@@ -149,3 +149,75 @@ def test_compras_simultaneas_do_mesmo_veiculo_so_uma_vence(
     assert resultados.count("AGUARDANDO_PAGAMENTO") == 1
     assert resultados.count("recusada") == 9
     assert api.anuncio(veiculo)["status"] == "RESERVADO"
+
+
+def test_cronjob_fecha_o_cliente_mongo_que_abriu(
+    monkeypatch: pytest.MonkeyPatch, cliente_mongo: MongoClient[dict[str, Any]]
+) -> None:
+    monkeypatch.setenv("TOKEN_SERVICO_ENTRADA", TOKEN_ENTRADA)
+    monkeypatch.setenv("TOKEN_SERVICO_SAIDA", TOKEN_SAIDA)
+    monkeypatch.setenv("CPF_CHAVE", CHAVE_CPF)
+    fechados: list[bool] = []
+
+    class Espiao(BancoMongo):
+        def fechar(self) -> None:
+            fechados.append(True)
+
+    monkeypatch.setattr(
+        recuperacao.BancoMongo,
+        "conectar",
+        lambda *_a: Espiao(cliente_mongo, "revenda_vendas_cronjob_proprio"),
+    )
+    assert recuperacao.main([]) == 0
+    assert fechados == [True]
+
+
+def test_sagas_paradas_contadas_pela_recuperacao_e_expostas_no_metrics(
+    api: Api,
+    banco: BancoMongo,
+    componentes: Componentes,
+    relogio: RelogioFixo,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Item 5.2 da revisão: saga com trabalho pendente e sem progresso há mais de 5 min."""
+    em_dia = api.compra_ok(api.replicar())  # aguardando pagamento, dentro do prazo
+    parada = api.compra_ok(api.replicar())
+    banco.db.compras.update_one(
+        {"_id": parada["id"]},
+        {
+            "$set": {
+                "status": StatusCompra.PROCESSANDO.value,
+                "atualizada_em": relogio.agora(),
+                "saga.lease_ate": relogio.agora() + timedelta(hours=1),  # pod travado
+            }
+        },
+    )
+    assert componentes.recuperar.sagas_paradas() == 0  # ainda dentro dos 5 minutos
+    relogio.avancar(timedelta(minutes=6))
+    assert componentes.recuperar.sagas_paradas() == 1
+    assert api.compra(em_dia["id"])["status"] == "AGUARDANDO_PAGAMENTO"
+    assert componentes.recuperar.executar().sagas_paradas == 1
+    texto = api.http.get("/metrics").text
+    assert "revenda_sagas_paradas 1.0" in texto
+
+    def banco_fora() -> int:
+        raise RuntimeError("MongoDB fora")
+
+    monkeypatch.setattr(componentes.recuperar, "sagas_paradas", banco_fora)
+    resposta = api.http.get("/metrics")
+    assert resposta.status_code == 200
+    assert "revenda_sagas_paradas NaN" in resposta.text
+
+
+def test_reserva_que_acabou_de_expirar_nao_conta_como_parada(
+    api: Api, componentes: Componentes, relogio: RelogioFixo
+) -> None:
+    """Revisão do 5.2: a compra que expira agora tem `atualizada_em` de 30 min atrás, mas só
+    passou a ter algo a fazer agora. Só conta se a recuperação não agir por 5 minutos."""
+    api.compra_ok(api.replicar())  # prazo da reserva: 30 minutos
+    relogio.avancar(timedelta(minutes=31))  # expirou há 1 minuto
+    assert componentes.recuperar.sagas_paradas() == 0
+    relogio.avancar(timedelta(minutes=5))  # expirou há 6 minutos e ninguém agiu
+    assert componentes.recuperar.sagas_paradas() == 1
+    componentes.recuperar.executar()  # a recuperação expira a compra
+    assert componentes.recuperar.sagas_paradas() == 0

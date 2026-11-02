@@ -136,26 +136,33 @@ class ClienteResiliente:
             self._contar("circuito_aberto")
             raise ParticipanteIndisponivelError(self.destino, "circuito aberto")
         ultimo_erro = ""
-        for tentativa in range(1, self._tentativas + 1):
-            try:
-                resposta = self._http.request(
-                    metodo, caminho, json=None if corpo is None else dict(corpo)
-                )
-            except httpx.TransportError as exc:
-                ultimo_erro = type(exc).__name__
-            else:
-                codigo = resposta.status_code
-                if codigo < 500:
-                    self.circuito.registrar_sucesso()
-                    self._contar("sucesso" if codigo < 400 else "recusa")
-                    return resposta
-                ultimo_erro = f"HTTP {codigo}"
-                if codigo not in STATUS_REPETIVEIS:
-                    break  # erro do servidor que não adianta repetir agora
-            if tentativa < self._tentativas:
-                self._contar("nova_tentativa")
-                # Jitter "cheio": espalha as novas tentativas de várias réplicas.
-                self._dormir(random.uniform(0, self._backoff * 2 ** (tentativa - 1)))  # noqa: S311
+        try:
+            for tentativa in range(1, self._tentativas + 1):
+                try:
+                    resposta = self._http.request(
+                        metodo, caminho, json=None if corpo is None else dict(corpo)
+                    )
+                except httpx.TransportError as exc:
+                    ultimo_erro = type(exc).__name__
+                else:
+                    codigo = resposta.status_code
+                    if codigo < 500:
+                        self.circuito.registrar_sucesso()
+                        self._contar("sucesso" if codigo < 400 else "recusa")
+                        return resposta
+                    ultimo_erro = f"HTTP {codigo}"
+                    if codigo not in STATUS_REPETIVEIS:
+                        break  # erro do servidor que não adianta repetir agora
+                if tentativa < self._tentativas:
+                    self._contar("nova_tentativa")
+                    # Jitter "cheio": espalha as novas tentativas de várias réplicas.
+                    self._dormir(random.uniform(0, self._backoff * 2 ** (tentativa - 1)))  # noqa: S311
+        except Exception:
+            # Erro inesperado (ex.: httpx.InvalidURL): conta como falha; senão a chamada de
+            # teste do meio-aberto nunca termina e o circuito fica preso recusando tudo.
+            self.circuito.registrar_falha()
+            self._contar("falha")
+            raise
         self.circuito.registrar_falha()
         self._contar("falha")
         raise ParticipanteIndisponivelError(self.destino, ultimo_erro)

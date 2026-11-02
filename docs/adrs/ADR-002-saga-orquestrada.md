@@ -28,13 +28,14 @@ A compra altera dados em dois serviços com bancos diferentes: o anúncio e a co
 | T2 | Bloquear veículo | compensável | C2 desbloquear |
 | T3 | Gerar cobrança | compensável | C3 cancelar cobrança |
 | T4 | Cobrança paga | **pivô** (decidido no principal) | |
-| T5 | Efetivar compra | retentável | |
+| T5 | Efetivar compra: fixa `data_venda` no instante da confirmação do pagamento | retentável | |
 | T6 | Marcar veículo vendido | retentável | |
 
 - **Gravar antes de chamar**: o passo é marcado como "em andamento" antes da chamada externa e "concluído" depois da resposta. Uma queda entre os dois deixa a saga num estado que a recuperação sabe tratar, porque toda operação é idempotente pela `compra_id`.
 - **Compensação em ordem inversa** e só dos passos concluídos ou em andamento (compensar um passo que não aconteceu é inofensivo, pela idempotência).
 - **Depois do pivô não se compensa**: falhas em T5 e T6 são repetidas até concluir.
-- **Antes do pivô, a falha cancela na hora**: o comprador ainda não tem o código do pagamento, então a compra é cancelada assim que T2 ou T3 falham (503 ou 409 na resposta). A liberação do anúncio (C1, local) roda imediatamente; as compensações remotas que falharem ficam pendentes, com backoff, até concluírem. Devolver o anúncio antes do C2 é seguro por causa da regra contra ressurreição do principal.
+- **Principal indisponível antes do pivô** (T2 ou T3 com as tentativas esgotadas): a compra é cancelada e o anúncio liberado (C1, local) na mesma requisição; as compensações remotas são agendadas para a recuperação, em vez de tentadas de novo contra o principal que acabou de falhar. O comprador recebe o 503 depois de uma rodada de tentativas, não de duas. Consequência visível: entre a resposta e a recuperação (até cerca de 1 minuto, mais se o principal continuar fora), o veículo segue bloqueado no principal enquanto a vitrine já o mostra à venda; um segundo comprador nesse intervalo recebe 409 `veiculo-indisponivel` e pode tentar de novo logo depois.
+- **Antes do pivô, a falha cancela na hora**: o comprador ainda não tem o código do pagamento, então a compra é cancelada assim que T2 ou T3 falham (503 ou 409 na resposta). A liberação do anúncio (C1, local) roda imediatamente. Quando a falha é uma recusa do principal (409), as compensações remotas rodam na mesma requisição; quando é indisponibilidade, elas não são tentadas na requisição e ficam com a recuperação, com backoff, até concluírem. Devolver o anúncio antes do C2 é seguro por causa da regra contra ressurreição do principal.
 - **Na espera do pagamento, o C3 decide**: expiração ou cancelamento do processador começam pelo cancelamento da cobrança. Se o principal responde que a cobrança já foi paga, o pivô aconteceu e a saga segue para T5 e T6; se o principal não responde, a compra continua aguardando e a decisão é tentada de novo.
 - Cada transição gera log estruturado, métrica (`saga_transicoes_total{passo, resultado}`) e span no trace.
 

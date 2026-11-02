@@ -19,7 +19,7 @@ import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import assert_never
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from vendas.application.portas import (
     BLOQUEIO_DE_OUTRA_COMPRA,
@@ -88,17 +88,26 @@ class OrquestradorCompra:
 
     # ------------------------------------------------------------ entrada
 
+    def novo_dono(self) -> str:
+        """Dono do lease de uma execução: o processo mais um sufixo único por chamada.
+
+        Duas requisições no mesmo pod (threads diferentes) nunca dividem um lease, e uma
+        execução que demorou além do lease não libera o lease de quem a substituiu.
+        """
+        return f"{self.dono}-{uuid4().hex[:12]}"
+
     def processar(self, compra_id: UUID) -> Compra | None:
-        """Toma o lease, avança o que der e o devolve. None se outro processo está com ela."""
+        """Toma o lease, avança o que der e o devolve. None se outra execução está com ela."""
+        dono = self.novo_dono()
         compra = self._compras.tomar_lease(
-            compra_id, self.dono, self._relogio.agora(), self.duracao_lease
+            compra_id, dono, self._relogio.agora(), self.duracao_lease
         )
         if compra is None:
             return None
         try:
             return self.avancar(compra)
         finally:
-            self._compras.liberar_lease(compra_id, self.dono)
+            self._compras.liberar_lease(compra_id, dono)
 
     def avancar(self, compra: Compra) -> Compra:
         """Executa ações até a saga esperar algo externo (pagamento ou nova tentativa)."""
@@ -224,6 +233,13 @@ class OrquestradorCompra:
             )
             compra.anotar(passo.value, "FALHA_TRANSITORIA", agora)
             compra.cancelar(MotivoCancelamento.FALHA_PROCESSAMENTO, agora)
+            # O principal acabou de esgotar as tentativas: o anúncio volta à vitrine já (C1
+            # é local) e as compensações remotas ficam com a recuperação, em vez de o
+            # comprador esperar outra rodada de tentativas contra o mesmo principal (o passo
+            # que falhou é T2 ou T3, então ao menos o C2 sempre fica pendente).
+            self._anuncios.liberar(compra.veiculo_id, compra.id, agora)
+            compra.concluir_compensacao(Compensacao.LIBERACAO, agora)
+            compra.agendar_retentativa(falha.detalhe, agora)
             self._salvar(compra)
 
     # ------------------------------------------------------------ espera do pagamento
